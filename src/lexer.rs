@@ -1,4 +1,4 @@
-use super::tokens::{Token, LiteralType, reserved_to_tokentype};
+use super::tokens::{reserved_to_tokentype, LiteralType, Token};
 use anyhow::Result;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -47,28 +47,28 @@ impl<'source> Lexer {
                     } else {
                         self.add_token(Token::Bang)
                     }
-                },
+                }
                 '=' => {
                     if let Some(_) = source.next_if(|c| *c == '=') {
                         self.add_token(Token::EqualEqual);
                     } else {
                         self.add_token(Token::Equal);
                     }
-                },
+                }
                 '<' => {
                     if let Some(_) = source.next_if(|c| *c == '=') {
                         self.add_token(Token::LessEqual);
                     } else {
                         self.add_token(Token::Less);
                     }
-                },
+                }
                 '>' => {
                     if let Some(_) = source.next_if(|c| *c == '=') {
                         self.add_token(Token::GreaterEqual);
                     } else {
                         self.add_token(Token::Greater);
                     }
-                },
+                }
                 // Comments
                 '/' => {
                     if let Some('/') = source.peek() {
@@ -82,7 +82,7 @@ impl<'source> Lexer {
                     } else {
                         self.add_token(Token::Slash);
                     }
-                },
+                }
                 // String literals
                 '"' => {
                     let mut s = String::new();
@@ -103,7 +103,7 @@ impl<'source> Lexer {
                         }
                     }
                     self.add_token(Token::Literal(LiteralType::String(s)));
-                },
+                }
                 // Numeric literals
                 '0'..='9' => {
                     let mut number_literal = String::new();
