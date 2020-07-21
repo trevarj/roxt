@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Token {
     // Single-character tokens.
     LeftParen,
@@ -48,7 +48,7 @@ pub enum Token {
     EOF,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum LiteralType {
     Identifier(String),
     String(String),
