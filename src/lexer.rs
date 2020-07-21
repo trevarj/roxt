@@ -276,7 +276,7 @@ mod tests {
             Token::This,
             Token::True,
             Token::Var,
-            Token::While
+            Token::While,
         ];
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let mut token_iter = lexer.tokens.iter();
@@ -309,7 +309,7 @@ mod tests {
             Token::Print,
             Token::Literal(LiteralType::String("hey mom".to_string())),
             Token::Semicolon,
-            Token::RightBrace
+            Token::RightBrace,
         ];
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let mut token_iter = lexer.tokens.iter();
@@ -329,8 +329,14 @@ mod tests {
         let input = "class main$";
 
         let result = lexer.scan_tokens(&mut input.chars().peekable());
-        let expected = LexError::UnexpectedToken { found: '$', line: 1};
-        assert_eq!(result.unwrap_err().downcast::<LexError>().unwrap(), expected);
+        let expected = LexError::UnexpectedToken {
+            found: '$',
+            line: 1,
+        };
+        assert_eq!(
+            result.unwrap_err().downcast::<LexError>().unwrap(),
+            expected
+        );
     }
 
     #[test]
@@ -341,7 +347,10 @@ mod tests {
 
         let result = lexer.scan_tokens(&mut input.chars().peekable());
         let expected = LexError::InvalidNumberFormat;
-        assert_eq!(result.unwrap_err().downcast::<LexError>().unwrap(), expected);
+        assert_eq!(
+            result.unwrap_err().downcast::<LexError>().unwrap(),
+            expected
+        );
     }
 
     #[test]
@@ -355,9 +364,5 @@ mod tests {
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
 
         assert_eq!(lexer.line, 5);
-
     }
-
-
-
 }
