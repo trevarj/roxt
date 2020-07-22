@@ -1,5 +1,5 @@
 #[derive(Debug, PartialEq)]
-pub enum Token {
+pub enum TokenType {
     // Single-character tokens.
     LeftParen,
     RightParen,
@@ -55,24 +55,39 @@ pub enum LiteralType {
     Number(f32),
 }
 
-pub fn reserved_to_tokentype(keyword: &str) -> Option<Token> {
+#[derive(Debug, PartialEq)]
+pub struct Token {
+    pub token: TokenType,
+    line: usize,
+}
+
+impl Token {
+    pub fn new(token_type: TokenType, line: usize) -> Self {
+        Self {
+            token: token_type,
+            line
+        }
+    }
+}
+
+pub fn reserved_to_tokentype(keyword: &str) -> Option<TokenType> {
     match keyword {
-        "and" => Some(Token::And),
-        "class" => Some(Token::Class),
-        "else" => Some(Token::Else),
-        "false" => Some(Token::False),
-        "fun" => Some(Token::Fun),
-        "for" => Some(Token::For),
-        "if" => Some(Token::If),
-        "nil" => Some(Token::Nil),
-        "or" => Some(Token::Or),
-        "print" => Some(Token::Print),
-        "return" => Some(Token::Return),
-        "super" => Some(Token::Super),
-        "this" => Some(Token::This),
-        "true" => Some(Token::True),
-        "var" => Some(Token::Var),
-        "while" => Some(Token::While),
+        "and" => Some(TokenType::And),
+        "class" => Some(TokenType::Class),
+        "else" => Some(TokenType::Else),
+        "false" => Some(TokenType::False),
+        "fun" => Some(TokenType::Fun),
+        "for" => Some(TokenType::For),
+        "if" => Some(TokenType::If),
+        "nil" => Some(TokenType::Nil),
+        "or" => Some(TokenType::Or),
+        "print" => Some(TokenType::Print),
+        "return" => Some(TokenType::Return),
+        "super" => Some(TokenType::Super),
+        "this" => Some(TokenType::This),
+        "true" => Some(TokenType::True),
+        "var" => Some(TokenType::Var),
+        "while" => Some(TokenType::While),
         _ => None,
     }
 }

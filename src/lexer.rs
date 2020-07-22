@@ -1,4 +1,4 @@
-use super::tokens::{reserved_to_tokentype, LiteralType, Token};
+use super::tokens::{Token, reserved_to_tokentype, LiteralType, TokenType};
 use anyhow::Result;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -28,47 +28,51 @@ impl<'source> Lexer {
         }
     }
 
+    pub fn get_tokens(&self) -> &[Token] {
+        &self.tokens
+    }
+
     pub fn scan_tokens(&mut self, source: &mut Peekable<Chars>) -> Result<()> {
         while let Some(c) = source.next() {
             match c {
                 // Single-character tokens
-                '(' => self.add_token(Token::LeftParen),
-                ')' => self.add_token(Token::RightParen),
-                '{' => self.add_token(Token::LeftBrace),
-                '}' => self.add_token(Token::RightBrace),
-                ',' => self.add_token(Token::Comma),
-                '.' => self.add_token(Token::Dot),
-                '-' => self.add_token(Token::Minus),
-                '+' => self.add_token(Token::Plus),
-                '*' => self.add_token(Token::Star),
-                ';' => self.add_token(Token::Semicolon),
+                '(' => self.add_token(TokenType::LeftParen),
+                ')' => self.add_token(TokenType::RightParen),
+                '{' => self.add_token(TokenType::LeftBrace),
+                '}' => self.add_token(TokenType::RightBrace),
+                ',' => self.add_token(TokenType::Comma),
+                '.' => self.add_token(TokenType::Dot),
+                '-' => self.add_token(TokenType::Minus),
+                '+' => self.add_token(TokenType::Plus),
+                '*' => self.add_token(TokenType::Star),
+                ';' => self.add_token(TokenType::Semicolon),
                 // Two-character tokens
                 '!' => {
                     if source.next_if(|c| *c == '=').is_some() {
-                        self.add_token(Token::BangEqual);
+                        self.add_token(TokenType::BangEqual);
                     } else {
-                        self.add_token(Token::Bang)
+                        self.add_token(TokenType::Bang)
                     }
                 }
                 '=' => {
                     if source.next_if(|c| *c == '=').is_some() {
-                        self.add_token(Token::EqualEqual);
+                        self.add_token(TokenType::EqualEqual);
                     } else {
-                        self.add_token(Token::Equal);
+                        self.add_token(TokenType::Equal);
                     }
                 }
                 '<' => {
                     if source.next_if(|c| *c == '=').is_some() {
-                        self.add_token(Token::LessEqual);
+                        self.add_token(TokenType::LessEqual);
                     } else {
-                        self.add_token(Token::Less);
+                        self.add_token(TokenType::Less);
                     }
                 }
                 '>' => {
                     if source.next_if(|c| *c == '=').is_some() {
-                        self.add_token(Token::GreaterEqual);
+                        self.add_token(TokenType::GreaterEqual);
                     } else {
-                        self.add_token(Token::Greater);
+                        self.add_token(TokenType::Greater);
                     }
                 }
                 // Comments
@@ -82,7 +86,7 @@ impl<'source> Lexer {
                             }
                         }
                     } else {
-                        self.add_token(Token::Slash);
+                        self.add_token(TokenType::Slash);
                     }
                 }
                 // String literals
@@ -104,7 +108,7 @@ impl<'source> Lexer {
                             anyhow::bail!(LexError::UnterminatedString);
                         }
                     }
-                    self.add_token(Token::Literal(LiteralType::String(s)));
+                    self.add_token(TokenType::Literal(LiteralType::String(s)));
                 }
                 // Numeric literals
                 '0'..='9' => {
@@ -132,7 +136,7 @@ impl<'source> Lexer {
                         }
                     }
                     let number: f32 = number_literal.parse()?;
-                    self.add_token(Token::Literal(LiteralType::Number(number)));
+                    self.add_token(TokenType::Literal(LiteralType::Number(number)));
                 }
                 // Identifiers
                 'a'..='z' | 'A'..='Z' | '_' => {
@@ -152,7 +156,7 @@ impl<'source> Lexer {
                         self.add_token(keyword);
                     } else {
                         // Just an identifier
-                        self.add_token(Token::Literal(LiteralType::Identifier(id)));
+                        self.add_token(TokenType::Literal(LiteralType::Identifier(id)));
                     }
                 }
 
@@ -165,13 +169,13 @@ impl<'source> Lexer {
                 }),
             }
         }
-        self.add_token(Token::EOF);
-        println!("Tokens: {:?}", self.tokens);
+        self.add_token(TokenType::EOF);
+        // println!("Tokens: {:?}", self.tokens);
         Ok(())
     }
 
-    fn add_token(&mut self, token_type: Token) {
-        self.tokens.push(token_type);
+    fn add_token(&mut self, token_type: TokenType) {
+        self.tokens.push(Token::new(token_type, self.line));
     }
 }
 
@@ -186,22 +190,22 @@ mod tests {
         let mut lexer = Lexer::new();
         let input = "(){},.-+*;";
         let expected: [Token; 10] = [
-            Token::LeftParen,
-            Token::RightParen,
-            Token::LeftBrace,
-            Token::RightBrace,
-            Token::Comma,
-            Token::Dot,
-            Token::Minus,
-            Token::Plus,
-            Token::Star,
-            Token::Semicolon,
+            Token::new( TokenType::LeftParen, 1),
+            Token::new( TokenType::RightParen, 1),
+            Token::new( TokenType::LeftBrace, 1),
+            Token::new( TokenType::RightBrace, 1),
+            Token::new( TokenType::Comma, 1),
+            Token::new( TokenType::Dot, 1),
+            Token::new( TokenType::Minus, 1),
+            Token::new( TokenType::Plus, 1),
+            Token::new( TokenType::Star, 1),
+            Token::new( TokenType::Semicolon, 1),
         ];
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let mut token_iter = lexer.tokens.iter();
         for exp in expected.iter() {
             if let Some(actual) = token_iter.next() {
-                assert_eq!(exp, actual);
+                assert_eq!(exp.token, actual.token);
             } else {
                 panic!();
             }
@@ -213,20 +217,20 @@ mod tests {
         let mut lexer = Lexer::new();
         let input = "! != = == > >= < <=";
         let expected: [Token; 8] = [
-            Token::Bang,
-            Token::BangEqual,
-            Token::Equal,
-            Token::EqualEqual,
-            Token::Greater,
-            Token::GreaterEqual,
-            Token::Less,
-            Token::LessEqual,
+            Token::new(TokenType::Bang,1),
+            Token::new(TokenType::BangEqual,1),
+            Token::new(TokenType::Equal,1),
+            Token::new(TokenType::EqualEqual,1),
+            Token::new(TokenType::Greater,1),
+            Token::new(TokenType::GreaterEqual,1),
+            Token::new(TokenType::Less,1),
+            Token::new(TokenType::LessEqual,1),
         ];
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let mut token_iter = lexer.tokens.iter();
         for exp in expected.iter() {
             if let Some(actual) = token_iter.next() {
-                assert_eq!(exp, actual);
+                assert_eq!(exp.token, actual.token);
             } else {
                 panic!();
             }
@@ -238,18 +242,18 @@ mod tests {
         let mut lexer = Lexer::new();
         let input = r#"Test_Class _unused "my string" 0.1 123 123.45"#;
         let expected: [Token; 6] = [
-            Token::Literal(LiteralType::Identifier("Test_Class".to_string())),
-            Token::Literal(LiteralType::Identifier("_unused".to_string())),
-            Token::Literal(LiteralType::String("my string".to_string())),
-            Token::Literal(LiteralType::Number(0.1)),
-            Token::Literal(LiteralType::Number(123.)),
-            Token::Literal(LiteralType::Number(123.45)),
+            Token::new(TokenType::Literal(LiteralType::Identifier("Test_Class".to_string())),1),
+            Token::new(TokenType::Literal(LiteralType::Identifier("_unused".to_string())),1),
+            Token::new(TokenType::Literal(LiteralType::String("my string".to_string())),1),
+            Token::new(TokenType::Literal(LiteralType::Number(0.1)),1),
+            Token::new(TokenType::Literal(LiteralType::Number(123.)),1),
+            Token::new(TokenType::Literal(LiteralType::Number(123.45)),1),
         ];
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let mut token_iter = lexer.tokens.iter();
         for exp in expected.iter() {
             if let Some(token) = token_iter.next() {
-                assert_eq!(exp, token);
+                assert_eq!(exp.token, token.token);
             } else {
                 panic!()
             }
@@ -261,28 +265,28 @@ mod tests {
         let mut lexer = Lexer::new();
         let input = "and class else false fun for if nil or print return super this true var while";
         let expected: [Token; 16] = [
-            Token::And,
-            Token::Class,
-            Token::Else,
-            Token::False,
-            Token::Fun,
-            Token::For,
-            Token::If,
-            Token::Nil,
-            Token::Or,
-            Token::Print,
-            Token::Return,
-            Token::Super,
-            Token::This,
-            Token::True,
-            Token::Var,
-            Token::While,
+            Token::new(TokenType::And,1),
+            Token::new(TokenType::Class,1),
+            Token::new(TokenType::Else,1),
+            Token::new(TokenType::False,1),
+            Token::new(TokenType::Fun,1),
+            Token::new(TokenType::For,1),
+            Token::new(TokenType::If,1),
+            Token::new(TokenType::Nil,1),
+            Token::new(TokenType::Or,1),
+            Token::new(TokenType::Print,1),
+            Token::new(TokenType::Return,1),
+            Token::new(TokenType::Super,1),
+            Token::new(TokenType::This,1),
+            Token::new(TokenType::True,1),
+            Token::new(TokenType::Var,1),
+            Token::new(TokenType::While,1),
         ];
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let mut token_iter = lexer.tokens.iter();
         for exp in expected.iter() {
             if let Some(token) = token_iter.next() {
-                assert_eq!(exp, token);
+                assert_eq!(exp.token, token.token);
             } else {
                 panic!()
             }
@@ -299,23 +303,23 @@ mod tests {
         }
         "#;
         let expected: [Token; 11] = [
-            Token::If,
-            Token::LeftParen,
-            Token::Literal(LiteralType::Identifier("i".to_string())),
-            Token::EqualEqual,
-            Token::Literal(LiteralType::Number(6.)),
-            Token::RightParen,
-            Token::LeftBrace,
-            Token::Print,
-            Token::Literal(LiteralType::String("hey mom".to_string())),
-            Token::Semicolon,
-            Token::RightBrace,
+            Token::new(TokenType::If,1),
+            Token::new(TokenType::LeftParen,1),
+            Token::new(TokenType::Literal(LiteralType::Identifier("i".to_string())),1),
+            Token::new(TokenType::EqualEqual,1),
+            Token::new(TokenType::Literal(LiteralType::Number(6.)),1),
+            Token::new(TokenType::RightParen,1),
+            Token::new(TokenType::LeftBrace,1),
+            Token::new(TokenType::Print,1),
+            Token::new(TokenType::Literal(LiteralType::String("hey mom".to_string())),1),
+            Token::new(TokenType::Semicolon,1),
+            Token::new(TokenType::RightBrace,1),
         ];
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let mut token_iter = lexer.tokens.iter();
         for exp in expected.iter() {
             if let Some(token) = token_iter.next() {
-                assert_eq!(exp, token);
+                assert_eq!(exp.token, token.token);
             } else {
                 panic!()
             }
