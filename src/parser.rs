@@ -214,4 +214,45 @@ mod test {
         let mut parser = Parser::new(tokens);
         assert_eq!(expr(&mut parser).unwrap().to_string(), "(* ((+ (-1) 2)) 2)");
     }
+
+    #[test]
+    fn test_syntax_error_doubleop() {
+        let mut lexer = Lexer::new();
+        let input = "1 * / 2";
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let expr = expr(&mut parser);
+        assert!(expr.is_err());
+        assert_eq!(
+            expr.unwrap_err().downcast::<ParseError>().unwrap(),
+            ParseError::UnexpectedToken {token: TokenType::Slash}
+        );
+    }
+
+    #[test]
+    fn test_syntax_error_trailingop() {
+        let mut lexer = Lexer::new();
+        let input = "1 * ";
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let expr = expr(&mut parser);
+        assert!(expr.is_err());
+        assert_eq!(
+            expr.unwrap_err().downcast::<ParseError>().unwrap(),
+            ParseError::UnexpectedToken {token: TokenType::EOF}
+        );
+    }
+
+    #[test]
+    fn test_syntax_error_postfix_plusplus() {
+        let mut lexer = Lexer::new();
+        let input = "1++";
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let expr = expr(&mut parser);
+        assert!(expr.is_err());
+    }
 }
