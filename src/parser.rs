@@ -1,6 +1,6 @@
 use super::tokens::{LiteralType, Token, TokenType};
 use anyhow::Result;
-use std::fmt::Display;
+use std::{fmt::Display, ops::Add};
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
@@ -81,7 +81,7 @@ impl Display for Expr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Atom {
     Nil,
     Number(f32),
@@ -114,7 +114,11 @@ fn expr_bp(p: &mut Parser, min_bp: u8) -> Result<Expr> {
                 | TokenType::Star
                 | TokenType::Slash
                 | TokenType::EqualEqual
-                | TokenType::BangEqual => token.token,
+                | TokenType::BangEqual
+                | TokenType::Less
+                | TokenType::LessEqual
+                | TokenType::Greater
+                | TokenType::GreaterEqual => token.token,
                 TokenType::EOF => break,
                 TokenType::RightParen => break,
                 t => anyhow::bail!(ParseError::UnexpectedToken { token: t }),
@@ -147,7 +151,12 @@ fn infix_binding_power(ttype: &TokenType) -> Option<(u8, u8)> {
     match ttype {
         TokenType::Plus | TokenType::Minus => Some((1, 2)),
         TokenType::Star | TokenType::Slash => Some((3, 4)),
-        TokenType::EqualEqual | TokenType::BangEqual => Some((5, 6)),
+        TokenType::EqualEqual
+        | TokenType::BangEqual
+        | TokenType::Less
+        | TokenType::LessEqual
+        | TokenType::Greater
+        | TokenType::GreaterEqual => Some((5, 6)),
         _ => None,
     }
 }
