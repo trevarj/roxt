@@ -1,7 +1,7 @@
 use super::tokens::{LiteralType, Token, TokenType};
 use anyhow::Result;
-use thiserror::Error;
 use std::fmt::Display;
+use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 enum ParseError {
@@ -41,68 +41,66 @@ impl Parser {
 }
 
 #[derive(Debug)]
-enum Expr {
+pub enum Expr {
     Grouping(Box<Expr>),
     Binary(Box<Expr>, TokenType, Box<Expr>),
     Unary(TokenType, Box<Expr>),
-    Literal(Atoms),
+    Literal(Atom),
 }
 
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Ok(match self {
-            Expr::Grouping(expr) => {
-                write!(f, "({})", expr)?
-            }
-            Expr::Binary(lhs,op, rhs) => {
+            Expr::Grouping(expr) => write!(f, "({})", expr)?,
+            Expr::Binary(lhs, op, rhs) => {
                 let op = match op {
                     TokenType::Plus => "+",
                     TokenType::Minus => "-",
                     TokenType::Star => "*",
                     TokenType::Slash => "/",
                     TokenType::EqualEqual => "==",
-                    _ => panic!("Cannot display this operator.")
+                    _ => panic!("Cannot display this operator."),
                 };
                 write!(f, "({} {} {})", op, lhs, rhs)?
-            },
+            }
             Expr::Unary(op, expr) => {
                 let op = match op {
                     TokenType::Bang => "!",
                     TokenType::Minus => "-",
-                    _ => panic!("Cannot display this operator.")
+                    _ => panic!("Cannot display this operator."),
                 };
                 write!(f, "({}{})", op, expr)?
             }
-            Expr::Literal(atom) => {
-                match atom {
-                    Atoms::Boolean(b) => {
-                        write!(f, "{}", b)?
-                    }
-                    Atoms::Nil => {
-                        write!(f, "Nil")?
-                    }
-                    Atoms::Number(n) => {
-                        write!(f, "{}", n)?
-                    }
-                    Atoms::String(s) => {
-                        write!(f, "{}", s)?
-                    }
-                }
-            }
+            Expr::Literal(atom) => match atom {
+                Atom::Boolean(b) => write!(f, "{}", b)?,
+                Atom::Nil => write!(f, "Nil")?,
+                Atom::Number(n) => write!(f, "{}", n)?,
+                Atom::String(s) => write!(f, "{}", s)?,
+            },
         })
     }
-    
 }
 
 #[derive(Debug)]
-enum Atoms {
-    Boolean(bool),
+pub enum Atom {
     Nil,
     Number(f32),
     String(String),
+    Boolean(bool),
 }
 
-fn expr(p: &mut Parser) -> Result<Expr> {
+impl Display for Atom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Atom::Nil => write!(f, "Nil"),
+            Atom::Number(n) => write!(f, "{}", n),
+            Atom::String(s) => write!(f, "{}", s),
+            Atom::Boolean(b) => write!(f, "{}", b),
+        }
+    }
+}
+
+pub fn expr(p: &mut Parser) -> Result<Expr> {
     expr_bp(p, 0)
 }
 
@@ -115,7 +113,8 @@ fn expr_bp(p: &mut Parser, min_bp: u8) -> Result<Expr> {
                 | TokenType::Minus
                 | TokenType::Star
                 | TokenType::Slash
-                | TokenType::EqualEqual => token.token,
+                | TokenType::EqualEqual
+                | TokenType::BangEqual => token.token,
                 TokenType::EOF => break,
                 TokenType::RightParen => break,
                 t => anyhow::bail!(ParseError::UnexpectedToken { token: t }),
@@ -127,7 +126,7 @@ fn expr_bp(p: &mut Parser, min_bp: u8) -> Result<Expr> {
                 }
                 p.next();
                 let rhs = expr_bp(p, r_bp)?;
-    
+
                 lhs = Expr::Binary(Box::new(lhs), op.clone(), Box::new(rhs));
                 continue;
             }
@@ -148,7 +147,7 @@ fn infix_binding_power(ttype: &TokenType) -> Option<(u8, u8)> {
     match ttype {
         TokenType::Plus | TokenType::Minus => Some((1, 2)),
         TokenType::Star | TokenType::Slash => Some((3, 4)),
-        TokenType::EqualEqual => Some((5, 6)),
+        TokenType::EqualEqual | TokenType::BangEqual => Some((5, 6)),
         _ => None,
     }
 }
@@ -172,11 +171,11 @@ fn unary(p: &mut Parser) -> Result<Expr> {
 fn primary(p: &mut Parser) -> Result<Expr> {
     Ok(if let Some(token) = p.next() {
         match token.token {
-            TokenType::False => Expr::Literal(Atoms::Boolean(false)),
-            TokenType::True => Expr::Literal(Atoms::Boolean(true)),
-            TokenType::Nil => Expr::Literal(Atoms::Nil),
-            TokenType::Literal(LiteralType::Number(n)) => Expr::Literal(Atoms::Number(n)),
-            TokenType::Literal(LiteralType::String(s)) => Expr::Literal(Atoms::String(s)),
+            TokenType::False => Expr::Literal(Atom::Boolean(false)),
+            TokenType::True => Expr::Literal(Atom::Boolean(true)),
+            TokenType::Nil => Expr::Literal(Atom::Nil),
+            TokenType::Literal(LiteralType::Number(n)) => Expr::Literal(Atom::Number(n)),
+            TokenType::Literal(LiteralType::String(s)) => Expr::Literal(Atom::String(s)),
             TokenType::LeftParen => {
                 let expr = expr_bp(p, 0)?;
                 p.expect(TokenType::RightParen)?;
@@ -226,7 +225,9 @@ mod test {
         assert!(expr.is_err());
         assert_eq!(
             expr.unwrap_err().downcast::<ParseError>().unwrap(),
-            ParseError::UnexpectedToken {token: TokenType::Slash}
+            ParseError::UnexpectedToken {
+                token: TokenType::Slash
+            }
         );
     }
 
@@ -241,7 +242,9 @@ mod test {
         assert!(expr.is_err());
         assert_eq!(
             expr.unwrap_err().downcast::<ParseError>().unwrap(),
-            ParseError::UnexpectedToken {token: TokenType::EOF}
+            ParseError::UnexpectedToken {
+                token: TokenType::EOF
+            }
         );
     }
 
@@ -249,6 +252,17 @@ mod test {
     fn test_syntax_error_postfix_plusplus() {
         let mut lexer = Lexer::new();
         let input = "1++";
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let expr = expr(&mut parser);
+        assert!(expr.is_err());
+    }
+
+    #[test]
+    fn test_syntax_error_lefthand_op() {
+        let mut lexer = Lexer::new();
+        let input = "* 1";
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();
         let mut parser = Parser::new(tokens);

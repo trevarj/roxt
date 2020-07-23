@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::{prelude::*, stdin, stdout, BufReader};
 use std::path::Path;
 
+mod interpreter;
 mod lexer;
 mod parser;
 mod tokens;
