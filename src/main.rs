@@ -7,6 +7,7 @@ use std::io::{prelude::*, stdin, stdout, BufReader};
 use std::path::Path;
 
 mod lexer;
+mod parser;
 mod tokens;
 #[derive(FromArgs, Debug)]
 /// Interpreter for the lox programming language. Built with Rust.
@@ -72,7 +73,8 @@ fn run_prompt() -> Result<()> {
 }
 
 fn run(source: &str) -> Result<()> {
-    let mut scanner = Lexer::new();
-    scanner.scan_tokens(&mut source.chars().peekable())?;
+    let mut lexer = Lexer::new();
+    lexer.scan_tokens(&mut source.chars().peekable())?;
+    let tokens = lexer.get_tokens();
     Ok(())
 }

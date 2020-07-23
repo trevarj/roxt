@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TokenType {
     // Single-character tokens.
     LeftParen,
@@ -48,14 +48,14 @@ pub enum TokenType {
     EOF,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LiteralType {
     Identifier(String),
     String(String),
     Number(f32),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Token {
     pub token: TokenType,
     line: usize,
@@ -65,7 +65,7 @@ impl Token {
     pub fn new(token_type: TokenType, line: usize) -> Self {
         Self {
             token: token_type,
-            line
+            line,
         }
     }
 }
