@@ -2,10 +2,13 @@
 use anyhow::{Context, Result};
 use argh::FromArgs;
 use lexer::Lexer;
+use parser::Parser;
 use std::fs::File;
 use std::io::{prelude::*, stdin, stdout, BufReader};
 use std::path::Path;
 
+mod ast;
+mod environment;
 mod interpreter;
 mod lexer;
 mod parser;
@@ -77,5 +80,7 @@ fn run(source: &str) -> Result<()> {
     let mut lexer = Lexer::new();
     lexer.scan_tokens(&mut source.chars().peekable())?;
     let tokens = lexer.get_tokens();
+    let mut parser = Parser::new(tokens);
+    // interpret(parser::parse(&mut parser)?)?;
     Ok(())
 }

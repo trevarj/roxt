@@ -58,7 +58,7 @@ pub enum LiteralType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Token {
     pub token: TokenType,
-    line: usize,
+    pub line: usize,
 }
 
 impl Token {

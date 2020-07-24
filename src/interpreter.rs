@@ -1,5 +1,6 @@
 use super::{
-    parser::{Atom, Expr},
+    ast::{Atom, Declaration, Expr, Program, Stmt},
+    environment::{Parental, Spaghetti},
     tokens::TokenType,
 };
 use anyhow::Result;
@@ -10,9 +11,59 @@ enum RuntimeError {
     #[error("Invalid operand for expression - {lhs:?} {op:?} {rhs:?}")]
     InvalidOperand { op: String, lhs: Atom, rhs: Atom },
     #[error("Invalid expression operator.")]
-    InvalidOperator,
+    InvalidOperator { op: TokenType },
     #[error("Cannot apply unary operator {op:?}.")]
     UnaryOperationInvalid { op: char },
+    #[error("Variable {id:?} is undefined or out of scope.")]
+    UndefinedVar { id: String },
+}
+
+type Env = Spaghetti;
+
+pub fn interpret(program: Program) -> Result<()> {
+    let env = Env::new_instance();
+    for decl in program.declarations {
+        evaluate_declaration(decl, env.clone())?;
+    }
+    Ok(())
+}
+
+fn evaluate_declaration(decl: Declaration, env: Env) -> Result<()> {
+    Ok(match decl {
+        Declaration::VarDecl(id, stmt) => {
+            if let Stmt::ExprStmt(expr) = stmt {
+                let val = evaluate_expr(expr)?;
+                env.set_var(id, val);
+            }
+        }
+        Declaration::Statement(stmt) => evaluate_statement(stmt, env)?,
+    })
+}
+
+fn evaluate_statement(stmt: Stmt, env: Env) -> Result<()> {
+    match stmt {
+        Stmt::ExprStmt(expr) => todo!(),
+        Stmt::PrintStmt(expr) => {
+            if let Expr::Literal(id) = expr {
+                let val = env.get_var(id.to_string());
+                if let Some(v) = val {
+                    println!("{}", v);
+                } else {
+                    anyhow::bail!(RuntimeError::UndefinedVar { id: id.to_string() })
+                }
+            } else {
+                let val = evaluate_expr(expr)?;
+                println!("{}", val);
+            }
+        }
+        Stmt::Block(decls) => {
+            let block_scope = env.child();
+            for decl in decls {
+                evaluate_declaration(decl, block_scope.clone())?
+            }
+        }
+    }
+    Ok(())
 }
 
 fn evaluate_expr(expr: Expr) -> Result<Atom> {
@@ -33,6 +84,7 @@ fn evaluate_expr(expr: Expr) -> Result<Atom> {
 
 fn evaluate_binary(op: TokenType, lhs: Atom, rhs: Atom) -> Result<Atom> {
     Ok(match op {
+        TokenType::Equal => rhs,
         TokenType::Plus => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Number(a + b),
             (Atom::String(a), Atom::String(b)) => Atom::String(a + &b),
@@ -118,7 +170,7 @@ fn evaluate_binary(op: TokenType, lhs: Atom, rhs: Atom) -> Result<Atom> {
                 rhs: b
             }),
         },
-        _ => anyhow::bail!(RuntimeError::InvalidOperator),
+        op => anyhow::bail!(RuntimeError::InvalidOperator { op: op }),
     })
 }
 
@@ -129,12 +181,13 @@ fn evaluate_unary(op: TokenType, atom: Atom) -> Result<Atom> {
             Atom::Nil => Atom::Boolean(false),
             Atom::Number(_) => Atom::Boolean(true),
             Atom::String(_) => Atom::Boolean(true),
+            Atom::Identifier(_) => todo!(),
         },
         TokenType::Minus => match atom {
             Atom::Number(n) => Atom::Number(-n),
             _ => anyhow::bail!(RuntimeError::UnaryOperationInvalid { op: '-' }),
         },
-        _ => anyhow::bail!(RuntimeError::InvalidOperator),
+        op => anyhow::bail!(RuntimeError::InvalidOperator { op: op }),
     })
 }
 
@@ -212,5 +265,51 @@ mod tests {
         let expr = expr(&mut parser).unwrap();
         let atom = evaluate_expr(expr).unwrap();
         assert_eq!(atom.to_string(), "true")
+    }
+
+    #[test]
+    fn test_var_declaration_and_print() {
+        let mut lexer = Lexer::new();
+        let input = r#"
+        var i = "test";
+        var boolean = !true;
+        var a = 5 + 5;
+        print i;
+        print boolean;
+        print a;
+        "#;
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let program = parse(&mut parser).unwrap();
+        let result = interpret(program);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_block_scope() {
+        let mut lexer = Lexer::new();
+        let input = r#"
+        var i = "outer";
+        var x = "find me";
+        {
+            var i = "inner";
+            {
+                var i = "way inside";
+                var t = "hidden";
+                print i;
+                print x;
+            }
+            //print t; <-- undefined in this scope
+            print i;
+        }
+        print i;
+        "#;
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let program = parse(&mut parser).unwrap();
+        let result = interpret(program);
+        assert!(result.is_ok());
     }
 }
