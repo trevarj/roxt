@@ -54,10 +54,8 @@ impl Parental for Spaghetti {
         self.borrow_mut().as_mut().unwrap().local_var(id, val)
     }
     fn get_var(&self, id: String) -> Option<Atom> {
-        let a = self.borrow();
-        let b = a.as_ref();
-        if let Some(b) = b {
-            b.find_var(id)
+        if let Some(meat) = self.borrow().as_ref() {
+            meat.find_var(id)
         } else {
             None
         }
