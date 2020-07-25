@@ -14,6 +14,7 @@ pub enum Declaration {
 pub enum Stmt {
     ExprStmt(Expr),
     IfStmt(Expr, Box<Stmt>, Option<Box<Stmt>>),
+    WhileStmt(Expr, Box<Stmt>),
     PrintStmt(Expr),
     Block(Vec<Declaration>),
 }

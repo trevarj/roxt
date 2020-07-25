@@ -75,6 +75,9 @@ fn evaluate_statement(stmt: Stmt, env: Env) -> Result<()> {
                 res => anyhow::bail!(RuntimeError::InvalidIfCondition { found: res }),
             }
         }
+        Stmt::WhileStmt(cond, stmt) => {
+            todo!()
+        }
         Stmt::PrintStmt(expr) => {
             if let Expr::Literal(atom) = expr {
                 let value = if let Atom::Identifier(id) = atom {
@@ -293,13 +296,17 @@ fn evaluate_unary(op: TokenType, atom: Atom) -> Result<Atom> {
 mod tests {
     use super::*;
     use crate::{lexer::*, parser::*};
-    #[test]
-    fn test_simple_expression_eval() {
+
+    fn parser_setup(input: &str) -> Parser {
         let mut lexer = Lexer::new();
-        let input = "1 + 1";
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        Parser::new(tokens)
+    }
+
+    #[test]
+    fn test_simple_expression_eval() {
+        let mut parser = parser_setup("1 + 1");
         let expr = expr(&mut parser).unwrap();
         let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "2")
@@ -307,11 +314,7 @@ mod tests {
 
     #[test]
     fn test_bang_bool() {
-        let mut lexer = Lexer::new();
-        let input = "!true";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("!true");
         let expr = expr(&mut parser).unwrap();
         let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "false")
@@ -319,11 +322,7 @@ mod tests {
 
     #[test]
     fn test_grouped_expr() {
-        let mut lexer = Lexer::new();
-        let input = "(2 + 2) * 2 / 2";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("(2 + 2) * 2 / 2");
         let expr = expr(&mut parser).unwrap();
         let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "4")
@@ -331,11 +330,7 @@ mod tests {
 
     #[test]
     fn test_nested_grouped_expr() {
-        let mut lexer = Lexer::new();
-        let input = "((((((((8))))))))";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("((((((((8))))))))");
         let expr = expr(&mut parser).unwrap();
         let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "8")
@@ -343,11 +338,7 @@ mod tests {
 
     #[test]
     fn test_string_concat() {
-        let mut lexer = Lexer::new();
-        let input = r#""hello " + "world""#;
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup(r#""hello " + "world""#);
         let expr = expr(&mut parser).unwrap();
         let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "hello world")
@@ -355,11 +346,7 @@ mod tests {
 
     #[test]
     fn test_less_than() {
-        let mut lexer = Lexer::new();
-        let input = "99 < 100";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("99 < 100");
         let expr = expr(&mut parser).unwrap();
         let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "true")
@@ -367,7 +354,6 @@ mod tests {
 
     #[test]
     fn test_var_declaration_and_print() {
-        let mut lexer = Lexer::new();
         let input = r#"
         var i = "test";
         var boolean = !true;
@@ -381,9 +367,7 @@ mod tests {
         print b;
         print undefined;
         "#;
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup(input);
         let program = parse(&mut parser).unwrap();
         let result = interpret(program);
         assert!(result.is_ok());
@@ -391,7 +375,6 @@ mod tests {
 
     #[test]
     fn test_block_scope() {
-        let mut lexer = Lexer::new();
         let input = r#"
         var i = "outer";
         var x = "find me";
@@ -408,9 +391,7 @@ mod tests {
         }
         print i;
         "#;
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup(input);
         let program = parse(&mut parser).unwrap();
         let result = interpret(program);
         assert!(result.is_ok());
@@ -418,7 +399,6 @@ mod tests {
 
     #[test]
     fn test_chapter8_challenge2() {
-        let mut lexer = Lexer::new();
         let input = r#"
         // No initializers.
         var a;
@@ -432,9 +412,7 @@ mod tests {
         print c = 2; // print true
         print c; // prints 2
         "#;
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup(input);
         let program = parse(&mut parser).unwrap();
         let result = interpret(program);
         assert!(result.is_ok());
@@ -442,7 +420,6 @@ mod tests {
 
     #[test]
     fn test_chapter8_challenge3() {
-        let mut lexer = Lexer::new();
         let input = r#"
         var a = 1;
         {
@@ -450,9 +427,7 @@ mod tests {
             print a;
         }
         "#;
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup(input);
         let program = parse(&mut parser).unwrap();
         let result = interpret(program);
         assert!(result.is_ok());
@@ -460,7 +435,6 @@ mod tests {
 
     #[test]
     fn test_logical_operators() {
-        let mut lexer = Lexer::new();
         let input = r#"
         var a = true;
         var b = false;
@@ -469,9 +443,7 @@ mod tests {
         print a or b;
         print b and a;
         "#;
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup(input);
         let program = parse(&mut parser).unwrap();
         let result = interpret(program);
         assert!(result.is_ok());
@@ -479,17 +451,20 @@ mod tests {
 
     #[test]
     fn test_if_else_statment() {
-        let mut lexer = Lexer::new();
         let input = r#"
         if (true) {
             print "hello!";
         } else {
             print "bye";
         }
+
+        var a = 5;
+        if (a == 2) {
+            // unreachable
+            print a;
+        }
         "#;
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup(input);
         let program = parse(&mut parser).unwrap();
         let result = interpret(program);
         assert!(result.is_ok());
