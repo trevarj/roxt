@@ -354,11 +354,12 @@ mod test {
     #[test]
     fn test_var_declaration() {
         let mut lexer = Lexer::new();
-        let input = "var i = 1 + 6 / 2;";
+        let input = "var i = 1 + 6 / 2; var b;";
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();
         let mut parser = Parser::new(tokens);
         let program = parse(&mut parser);
+        println!("{:?}", program);
         assert!(program.is_ok());
     }
 

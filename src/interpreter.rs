@@ -6,7 +6,7 @@ use super::{
 use anyhow::Result;
 use thiserror::Error;
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 enum RuntimeError {
     #[error("Invalid operand for expression - {lhs:?} {op:?} {rhs:?}")]
     InvalidOperand { op: String, lhs: Atom, rhs: Atom },
@@ -16,6 +16,10 @@ enum RuntimeError {
     UnaryOperationInvalid { op: char },
     #[error("Variable {id:?} is undefined or out of scope.")]
     UndefinedVar { id: String },
+    #[error("Unsupported assignment: {type_a:?} = {type_b:?}.")]
+    UnsupportedAssignment { type_a: String, type_b: String },
+    #[error("Invalid variable declaration, {expr:?}")]
+    InvalidVarDeclaration { expr: Expr },
 }
 
 type Env = Spaghetti;
@@ -32,8 +36,18 @@ fn evaluate_declaration(decl: Declaration, env: Env) -> Result<()> {
     Ok(match decl {
         Declaration::VarDecl(id, stmt) => {
             if let Stmt::ExprStmt(expr) = stmt {
-                let val = evaluate_expr(expr, env.clone())?;
-                env.set_var(id, val);
+                match expr {
+                    Expr::Binary(_, _, rhs) => {
+                        // declare and assign
+                        let val = evaluate_expr(*rhs, env.clone())?;
+                        env.set_var(id, val);
+                    }
+                    Expr::Literal(_) => {
+                        // declaration, no assignment
+                        env.set_var(id, Atom::Nil)
+                    }
+                    expr => anyhow::bail!(RuntimeError::InvalidVarDeclaration { expr }),
+                }
             }
         }
         Declaration::Statement(stmt) => evaluate_statement(stmt, env)?,
@@ -44,10 +58,10 @@ fn evaluate_statement(stmt: Stmt, env: Env) -> Result<()> {
     match stmt {
         Stmt::ExprStmt(expr) => {
             evaluate_expr(expr, env)?;
-        },
+        }
         Stmt::PrintStmt(expr) => {
             if let Expr::Literal(id) = expr {
-                let val = env.get_var(id.to_string());
+                let val = env.get_var(id.to_string().as_str());
                 if let Some(v) = val {
                     println!("{}", v);
                 } else {
@@ -73,31 +87,55 @@ fn evaluate_expr(expr: Expr, env: Env) -> Result<Atom> {
         Expr::Grouping(expr) => evaluate_expr(*expr, env),
         Expr::Binary(lhs, op, rhs) => {
             let left = evaluate_expr(*lhs, env.clone())?;
-            let right = evaluate_expr(*rhs, env)?;
-            evaluate_binary(op, left, right)
+            let right = evaluate_expr(*rhs, env.clone())?;
+            evaluate_binary(op, left, right, env)
         }
         Expr::Unary(op, expr) => {
             let atom = evaluate_expr(*expr, env)?;
             evaluate_unary(op, atom)
         }
         Expr::Literal(a) => {
-            if let Atom::Identifier(ref val) = a {
-                if let Some(var) = env.get_var(val.to_string()) {
+            if let Atom::Identifier(val) = a {
+                if let Some(var) = env.get_var(&val) {
                     Ok(var)
                 } else {
-                    Ok(a)
+                    anyhow::bail!(RuntimeError::UndefinedVar { id: val })
                 }
             } else {
                 Ok(a)
             }
-            
         }
     }
 }
 
-fn evaluate_binary(op: TokenType, lhs: Atom, rhs: Atom) -> Result<Atom> {
+fn evaluate_binary(op: TokenType, lhs: Atom, rhs: Atom, env: Env) -> Result<Atom> {
     Ok(match op {
-        TokenType::Equal => rhs,
+        TokenType::Equal => match (lhs, rhs) {
+            (Atom::Identifier(a), Atom::Identifier(b)) => {
+                if let Some(_) = env.get_var(&a) {
+                    if let Some(right_id) = env.get_var(&b) {
+                        env.set_var(a, right_id);
+                        Atom::Boolean(true)
+                    } else {
+                        anyhow::bail!(RuntimeError::UndefinedVar { id: b })
+                    }
+                } else {
+                    anyhow::bail!(RuntimeError::UndefinedVar { id: a })
+                }
+            }
+            (Atom::Identifier(a), b) => {
+                if let Some(_) = env.get_var(&a) {
+                    env.set_var(a, b);
+                    Atom::Boolean(true)
+                } else {
+                    anyhow::bail!(RuntimeError::UndefinedVar { id: a })
+                }
+            }
+            (a, b) => anyhow::bail!(RuntimeError::UnsupportedAssignment {
+                type_a: a.to_string(),
+                type_b: b.to_string()
+            }),
+        },
         TokenType::Plus => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Number(a + b),
             (Atom::String(a), Atom::String(b)) => Atom::String(a + &b),
@@ -288,10 +326,13 @@ mod tests {
         var boolean = !true;
         var a = 5 + 5;
         var b = a + 1;
+        var undefined = nil;
+        var a;
         print i;
         print boolean;
         print a;
         print b;
+        print undefined;
         "#;
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();

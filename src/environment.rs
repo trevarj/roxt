@@ -13,7 +13,7 @@ pub trait Parental {
     fn new_instance() -> Spaghetti;
     fn child(&self) -> Spaghetti;
     fn set_var(&self, id: String, val: Atom);
-    fn get_var(&self, id: String) -> Option<Atom>;
+    fn get_var(&self, id: &str) -> Option<Atom>;
 }
 
 impl Meatball {
@@ -29,8 +29,8 @@ impl Meatball {
     }
 
     /// Searches local map or searches through ancestors
-    pub fn find_var(&self, name: String) -> Option<Atom> {
-        let mut var = self.local.get(&name).cloned();
+    pub fn find_var(&self, name: &str) -> Option<Atom> {
+        let mut var = self.local.get(name).cloned();
         if var.is_none() {
             if let Some(parent) = self.parent.borrow().as_ref() {
                 var = parent.find_var(name);
@@ -53,7 +53,7 @@ impl Parental for Spaghetti {
     fn set_var(&self, id: String, val: Atom) {
         self.borrow_mut().as_mut().unwrap().local_var(id, val)
     }
-    fn get_var(&self, id: String) -> Option<Atom> {
+    fn get_var(&self, id: &str) -> Option<Atom> {
         if let Some(meat) = self.borrow().as_ref() {
             meat.find_var(id)
         } else {
@@ -71,7 +71,7 @@ mod tests {
         meatball.set_var("var1".to_string(), Atom::Boolean(true));
 
         let childmeat = meatball.child();
-        let parent_val = childmeat.get_var("var1".to_string()).unwrap();
+        let parent_val = childmeat.get_var("var1").unwrap();
         assert_eq!(parent_val, Atom::Boolean(true));
     }
 }
