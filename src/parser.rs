@@ -108,6 +108,18 @@ fn stmt(p: &mut Parser, keyword: TokenType) -> Result<Stmt> {
             } else {
                 anyhow::bail!(ParseError::UnexpectedEOF);
             }
+        },
+        TokenType::While => {
+            p.expect(TokenType::While)?;
+            p.expect(TokenType::LeftParen)?;
+            let cond = expr(p)?;
+            p.expect(TokenType::RightParen)?;
+            if let Some(next_token) = p.peek() {
+                let main_stmt = stmt(p, next_token.token)?;
+                Stmt::WhileStmt(cond, Box::new(main_stmt))
+            } else {
+                anyhow::bail!(ParseError::UnexpectedEOF);
+            }
         }
         TokenType::Print => {
             p.expect(TokenType::Print)?;
@@ -254,33 +266,29 @@ fn primary(p: &mut Parser) -> Result<Expr> {
 mod test {
     use super::*;
     use crate::Lexer;
-    #[test]
-    fn test_simple_parse_expression() {
+
+    fn parser_setup(input: &str) -> Parser {
         let mut lexer = Lexer::new();
-        let input = "-1 + 2 * 2";
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        Parser::new(tokens)
+    }
+
+    #[test]
+    fn test_simple_parse_expression() {
+        let mut parser = parser_setup("-1 + 2 * 2");
         assert_eq!(expr(&mut parser).unwrap().to_string(), "(+ (-1) (* 2 2))");
     }
 
     #[test]
     fn test_parse_grouping_expression() {
-        let mut lexer = Lexer::new();
-        let input = "(-1 + 2) * 2";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("(-1 + 2) * 2");
         assert_eq!(expr(&mut parser).unwrap().to_string(), "(* ((+ (-1) 2)) 2)");
     }
 
     #[test]
     fn test_parse_conditional_expression() {
-        let mut lexer = Lexer::new();
-        let input = "1 + 2 < 2 + 2";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("1 + 2 < 2 + 2");
         assert_eq!(
             expr(&mut parser).unwrap().to_string(),
             "(< (+ 1 2) (+ 2 2))"
@@ -289,11 +297,7 @@ mod test {
 
     #[test]
     fn test_syntax_error_doubleop() {
-        let mut lexer = Lexer::new();
-        let input = "1 * / 2";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("1 * / 2");
         let expr = expr(&mut parser);
         assert!(expr.is_err());
         assert_eq!(
@@ -307,11 +311,7 @@ mod test {
 
     #[test]
     fn test_syntax_error_trailingop() {
-        let mut lexer = Lexer::new();
-        let input = "1 * ";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("1 * ");
         let expr = expr(&mut parser);
         assert!(expr.is_err());
         assert_eq!(
@@ -325,43 +325,27 @@ mod test {
 
     #[test]
     fn test_syntax_error_postfix_plusplus() {
-        let mut lexer = Lexer::new();
-        let input = "1++";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("1++");
         let expr = expr(&mut parser);
         assert!(expr.is_err());
     }
 
     #[test]
     fn test_syntax_error_lefthand_op() {
-        let mut lexer = Lexer::new();
-        let input = "* 1";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("* 1");
         let expr = expr(&mut parser);
         assert!(expr.is_err());
     }
 
     #[test]
     fn test_assign_identifier() {
-        let mut lexer = Lexer::new();
-        let input = "i = 1";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("i = 1");
         assert_eq!(expr(&mut parser).unwrap().to_string(), "(= i 1)");
     }
 
     #[test]
     fn test_assign_identifier_expr() {
-        let mut lexer = Lexer::new();
-        let input = "i = 1 + 6 / 2";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("i = 1 + 6 / 2");
         assert_eq!(
             expr(&mut parser).unwrap().to_string(),
             "(= i (+ 1 (/ 6 2)))"
@@ -370,21 +354,13 @@ mod test {
 
     #[test]
     fn test_multiassign_expr() {
-        let mut lexer = Lexer::new();
-        let input = "a = b = c";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("a = b = c");
         assert_eq!(expr(&mut parser).unwrap().to_string(), "(= a (= b c))");
     }
 
     #[test]
     fn test_var_declaration() {
-        let mut lexer = Lexer::new();
-        let input = "var i = 1 + 6 / 2; var b;";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("var i = 1 + 6 / 2; var b;");
         let program = parse(&mut parser);
         println!("{:?}", program);
         assert!(program.is_ok());
@@ -392,11 +368,7 @@ mod test {
 
     #[test]
     fn test_block() {
-        let mut lexer = Lexer::new();
-        let input = "{ var i = 1 + 6 / 2; { print i; } }";
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup("{ var i = 1 + 6 / 2; { print i; } }");
         let program = parse(&mut parser);
         println!("{:#?}", program);
         assert!(program.is_ok());
@@ -404,7 +376,6 @@ mod test {
 
     #[test]
     fn test_if_else() {
-        let mut lexer = Lexer::new();
         let input = r#"
         if (true) {
             print "hello";
@@ -412,9 +383,20 @@ mod test {
             print "false";
         }
         "#;
-        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
-        let tokens = lexer.get_tokens();
-        let mut parser = Parser::new(tokens);
+        let mut parser = parser_setup(input);
+        let program = parse(&mut parser);
+        println!("{:#?}", program);
+        assert!(program.is_ok());
+    }
+
+    #[test]
+    fn test_while_loop() {
+        let input = r#"
+        while(true){
+            print "hello";
+        }
+        "#;
+        let mut parser = parser_setup(input);
         let program = parse(&mut parser);
         println!("{:#?}", program);
         assert!(program.is_ok());
