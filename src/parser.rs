@@ -13,6 +13,8 @@ enum ParseError {
     UnexpectedToken { token: TokenType, line: usize },
     #[error("Expecting identifier after 'var', found {token:?}.")]
     ExpectedIdentiferForVar { token: TokenType },
+    #[error("Unexpected EOF.")]
+    UnexpectedEOF,
 }
 pub struct Parser {
     tokens: Vec<Token>,
@@ -82,6 +84,31 @@ fn declaration(p: &mut Parser, keyword: TokenType) -> Result<Declaration> {
 
 fn stmt(p: &mut Parser, keyword: TokenType) -> Result<Stmt> {
     Ok(match keyword {
+        TokenType::If => {
+            p.expect(TokenType::If)?;
+            p.expect(TokenType::LeftParen)?;
+            let cond = expr(p)?;
+            p.expect(TokenType::RightParen)?;
+            if let Some(next_token) = p.peek() {
+                let main_stmt = stmt(p, next_token.token)?;
+                let mut else_stmt = None;
+                if let Some(Token {
+                    token: TokenType::Else,
+                    ..
+                }) = p.peek()
+                {
+                    p.expect(TokenType::Else)?;
+                    if let Some(next_token) = p.peek() {
+                        else_stmt = Some(Box::new(stmt(p, next_token.token)?));
+                    } else {
+                        anyhow::bail!(ParseError::UnexpectedEOF);
+                    }
+                }
+                Stmt::IfStmt(cond, Box::new(main_stmt), else_stmt)
+            } else {
+                anyhow::bail!(ParseError::UnexpectedEOF);
+            }
+        }
         TokenType::Print => {
             p.expect(TokenType::Print)?;
             let expr = expr(p)?;
@@ -367,6 +394,24 @@ mod test {
     fn test_block() {
         let mut lexer = Lexer::new();
         let input = "{ var i = 1 + 6 / 2; { print i; } }";
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let program = parse(&mut parser);
+        println!("{:#?}", program);
+        assert!(program.is_ok());
+    }
+
+    #[test]
+    fn test_if_else() {
+        let mut lexer = Lexer::new();
+        let input = r#"
+        if (true) {
+            print "hello";
+        } else {
+            print "false";
+        }
+        "#;
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();
         let mut parser = Parser::new(tokens);

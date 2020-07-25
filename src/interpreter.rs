@@ -20,6 +20,8 @@ enum RuntimeError {
     UnsupportedAssignment { type_a: String, type_b: String },
     #[error("Invalid variable declaration, {expr:?}")]
     InvalidVarDeclaration { expr: Expr },
+    #[error("Invalid condition for if-else, {found:?}")]
+    InvalidIfCondition { found: Atom },
 }
 
 type Env = Spaghetti;
@@ -59,15 +61,32 @@ fn evaluate_statement(stmt: Stmt, env: Env) -> Result<()> {
         Stmt::ExprStmt(expr) => {
             evaluate_expr(expr, env)?;
         }
-        Stmt::IfStmt(_, _, _) => todo!(),
-        Stmt::PrintStmt(expr) => {
-            if let Expr::Literal(id) = expr {
-                let val = env.get_var(id.to_string().as_str());
-                if let Some(v) = val {
-                    println!("{}", v);
-                } else {
-                    anyhow::bail!(RuntimeError::UndefinedVar { id: id.to_string() })
+        Stmt::IfStmt(cond, stmt, else_stmt) => {
+            match evaluate_expr(cond, env.clone())? {
+                Atom::Boolean(true) => {
+                    // execute main stmt (or block)
+                    evaluate_statement(*stmt, env.clone())?
                 }
+                Atom::Boolean(false) => {
+                    if let Some(else_stmt) = else_stmt {
+                        evaluate_statement(*else_stmt, env.clone())?
+                    }
+                }
+                res => anyhow::bail!(RuntimeError::InvalidIfCondition { found: res }),
+            }
+        }
+        Stmt::PrintStmt(expr) => {
+            if let Expr::Literal(atom) = expr {
+                let value = if let Atom::Identifier(id) = atom {
+                    if let Some(var) = env.get_var(id.as_str()) {
+                        var.to_string()
+                    } else {
+                        anyhow::bail!(RuntimeError::UndefinedVar { id })
+                    }
+                } else {
+                    atom.to_string()
+                };
+                println!("{}", value);
             } else {
                 let val = evaluate_expr(expr, env)?;
                 println!("{}", val);
@@ -449,6 +468,24 @@ mod tests {
         //short circuit
         print a or b;
         print b and a;
+        "#;
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let program = parse(&mut parser).unwrap();
+        let result = interpret(program);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_if_else_statment() {
+        let mut lexer = Lexer::new();
+        let input = r#"
+        if (true) {
+            print "hello!";
+        } else {
+            print "bye";
+        }
         "#;
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();
