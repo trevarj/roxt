@@ -32,7 +32,7 @@ fn evaluate_declaration(decl: Declaration, env: Env) -> Result<()> {
     Ok(match decl {
         Declaration::VarDecl(id, stmt) => {
             if let Stmt::ExprStmt(expr) = stmt {
-                let val = evaluate_expr(expr)?;
+                let val = evaluate_expr(expr, env.clone())?;
                 env.set_var(id, val);
             }
         }
@@ -42,7 +42,9 @@ fn evaluate_declaration(decl: Declaration, env: Env) -> Result<()> {
 
 fn evaluate_statement(stmt: Stmt, env: Env) -> Result<()> {
     match stmt {
-        Stmt::ExprStmt(expr) => todo!(),
+        Stmt::ExprStmt(expr) => {
+            evaluate_expr(expr, env)?;
+        },
         Stmt::PrintStmt(expr) => {
             if let Expr::Literal(id) = expr {
                 let val = env.get_var(id.to_string());
@@ -52,7 +54,7 @@ fn evaluate_statement(stmt: Stmt, env: Env) -> Result<()> {
                     anyhow::bail!(RuntimeError::UndefinedVar { id: id.to_string() })
                 }
             } else {
-                let val = evaluate_expr(expr)?;
+                let val = evaluate_expr(expr, env)?;
                 println!("{}", val);
             }
         }
@@ -66,19 +68,30 @@ fn evaluate_statement(stmt: Stmt, env: Env) -> Result<()> {
     Ok(())
 }
 
-fn evaluate_expr(expr: Expr) -> Result<Atom> {
+fn evaluate_expr(expr: Expr, env: Env) -> Result<Atom> {
     match expr {
-        Expr::Grouping(expr) => evaluate_expr(*expr),
+        Expr::Grouping(expr) => evaluate_expr(*expr, env),
         Expr::Binary(lhs, op, rhs) => {
-            let left = evaluate_expr(*lhs)?;
-            let right = evaluate_expr(*rhs)?;
+            let left = evaluate_expr(*lhs, env.clone())?;
+            let right = evaluate_expr(*rhs, env)?;
             evaluate_binary(op, left, right)
         }
         Expr::Unary(op, expr) => {
-            let atom = evaluate_expr(*expr)?;
+            let atom = evaluate_expr(*expr, env)?;
             evaluate_unary(op, atom)
         }
-        Expr::Literal(a) => Ok(a),
+        Expr::Literal(a) => {
+            if let Atom::Identifier(ref val) = a {
+                if let Some(var) = env.get_var(val.to_string()) {
+                    Ok(var)
+                } else {
+                    Ok(a)
+                }
+            } else {
+                Ok(a)
+            }
+            
+        }
     }
 }
 
@@ -203,7 +216,7 @@ mod tests {
         let tokens = lexer.get_tokens();
         let mut parser = Parser::new(tokens);
         let expr = expr(&mut parser).unwrap();
-        let atom = evaluate_expr(expr).unwrap();
+        let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "2")
     }
 
@@ -215,7 +228,7 @@ mod tests {
         let tokens = lexer.get_tokens();
         let mut parser = Parser::new(tokens);
         let expr = expr(&mut parser).unwrap();
-        let atom = evaluate_expr(expr).unwrap();
+        let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "false")
     }
 
@@ -227,7 +240,7 @@ mod tests {
         let tokens = lexer.get_tokens();
         let mut parser = Parser::new(tokens);
         let expr = expr(&mut parser).unwrap();
-        let atom = evaluate_expr(expr).unwrap();
+        let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "4")
     }
 
@@ -239,7 +252,7 @@ mod tests {
         let tokens = lexer.get_tokens();
         let mut parser = Parser::new(tokens);
         let expr = expr(&mut parser).unwrap();
-        let atom = evaluate_expr(expr).unwrap();
+        let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "8")
     }
 
@@ -251,7 +264,7 @@ mod tests {
         let tokens = lexer.get_tokens();
         let mut parser = Parser::new(tokens);
         let expr = expr(&mut parser).unwrap();
-        let atom = evaluate_expr(expr).unwrap();
+        let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "hello world")
     }
 
@@ -263,7 +276,7 @@ mod tests {
         let tokens = lexer.get_tokens();
         let mut parser = Parser::new(tokens);
         let expr = expr(&mut parser).unwrap();
-        let atom = evaluate_expr(expr).unwrap();
+        let atom = evaluate_expr(expr, Env::new_instance()).unwrap();
         assert_eq!(atom.to_string(), "true")
     }
 
@@ -274,9 +287,11 @@ mod tests {
         var i = "test";
         var boolean = !true;
         var a = 5 + 5;
+        var b = a + 1;
         print i;
         print boolean;
         print a;
+        print b;
         "#;
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();
