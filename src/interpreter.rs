@@ -55,11 +55,11 @@ fn evaluate_declaration(decl: Declaration, env: Env) -> Result<()> {
 }
 
 fn evaluate_statement(stmt: Stmt, env: Env) -> Result<()> {
-    println!("{:?}", stmt);
     match stmt {
         Stmt::ExprStmt(expr) => {
             evaluate_expr(expr, env)?;
         }
+        Stmt::IfStmt(_, _, _) => todo!(),
         Stmt::PrintStmt(expr) => {
             if let Expr::Literal(id) = expr {
                 let val = env.get_var(id.to_string().as_str());
@@ -88,8 +88,15 @@ fn evaluate_expr(expr: Expr, env: Env) -> Result<Atom> {
         Expr::Grouping(expr) => evaluate_expr(*expr, env),
         Expr::Binary(lhs, op, rhs) => {
             let left = evaluate_expr(*lhs, env.clone())?;
-            let right = evaluate_expr(*rhs, env.clone())?;
-            evaluate_binary(op, left, right, env)
+            // Short circuiting for logic operations
+            match (op, left) {
+                (TokenType::Or, Atom::Boolean(true)) => return Ok(Atom::Boolean(true)),
+                (TokenType::And, Atom::Boolean(false)) => return Ok(Atom::Boolean(false)),
+                (op, left) => {
+                    let right = evaluate_expr(*rhs, env.clone())?;
+                    evaluate_binary(op, left, right, env)
+                }
+            }
         }
         Expr::Unary(op, expr) => {
             let atom = evaluate_expr(*expr, env)?;
@@ -222,6 +229,22 @@ fn evaluate_binary(op: TokenType, lhs: Atom, rhs: Atom, env: Env) -> Result<Atom
             (Atom::Number(a), Atom::Number(b)) => Atom::Boolean(a >= b),
             (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
                 op: ">=".to_string(),
+                lhs: a,
+                rhs: b
+            }),
+        },
+        TokenType::And => match (lhs, rhs) {
+            (Atom::Boolean(a), Atom::Boolean(b)) => Atom::Boolean(a && b),
+            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
+                op: "and".to_string(),
+                lhs: a,
+                rhs: b
+            }),
+        },
+        TokenType::Or => match (lhs, rhs) {
+            (Atom::Boolean(a), Atom::Boolean(b)) => Atom::Boolean(a || b),
+            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
+                op: "or".to_string(),
                 lhs: a,
                 rhs: b
             }),
@@ -407,6 +430,25 @@ mod tests {
             var a = a + 2;
             print a;
         }
+        "#;
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let program = parse(&mut parser).unwrap();
+        let result = interpret(program);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_logical_operators() {
+        let mut lexer = Lexer::new();
+        let input = r#"
+        var a = true;
+        var b = false;
+
+        //short circuit
+        print a or b;
+        print b and a;
         "#;
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();

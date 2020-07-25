@@ -13,6 +13,7 @@ pub enum Declaration {
 #[derive(Debug)]
 pub enum Stmt {
     ExprStmt(Expr),
+    IfStmt(Expr, Box<Stmt>, Option<Box<Stmt>>),
     PrintStmt(Expr),
     Block(Vec<Declaration>),
 }

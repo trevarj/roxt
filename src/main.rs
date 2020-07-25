@@ -1,6 +1,7 @@
 #![feature(peekable_next_if)]
 use anyhow::{Context, Result};
 use argh::FromArgs;
+use interpreter::interpret;
 use lexer::Lexer;
 use parser::Parser;
 use std::fs::File;
@@ -81,6 +82,6 @@ fn run(source: &str) -> Result<()> {
     lexer.scan_tokens(&mut source.chars().peekable())?;
     let tokens = lexer.get_tokens();
     let mut parser = Parser::new(tokens);
-    // interpret(parser::parse(&mut parser)?)?;
+    interpret(parser::parse(&mut parser)?)?;
     Ok(())
 }
