@@ -55,6 +55,7 @@ fn evaluate_declaration(decl: Declaration, env: Env) -> Result<()> {
 }
 
 fn evaluate_statement(stmt: Stmt, env: Env) -> Result<()> {
+    println!("{:?}", stmt);
     match stmt {
         Stmt::ExprStmt(expr) => {
             evaluate_expr(expr, env)?;
@@ -95,11 +96,15 @@ fn evaluate_expr(expr: Expr, env: Env) -> Result<Atom> {
             evaluate_unary(op, atom)
         }
         Expr::Literal(a) => {
-            if let Atom::Identifier(val) = a {
-                if let Some(var) = env.get_var(&val) {
-                    Ok(var)
+            if let Atom::Identifier(ref id) = a {
+                if let Some(var) = env.get_var(&id) {
+                    if let Atom::Nil = var {
+                        Ok(a)
+                    } else {
+                        Ok(var)
+                    }
                 } else {
-                    anyhow::bail!(RuntimeError::UndefinedVar { id: val })
+                    anyhow::bail!(RuntimeError::UndefinedVar { id: id.to_string() })
                 }
             } else {
                 Ok(a)
@@ -360,6 +365,48 @@ mod tests {
             print i;
         }
         print i;
+        "#;
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let program = parse(&mut parser).unwrap();
+        let result = interpret(program);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_chapter8_challenge2() {
+        let mut lexer = Lexer::new();
+        let input = r#"
+        // No initializers.
+        var a;
+        var b;
+        var c;
+
+        a = "assigned";
+        print a; // OK, was assigned first.
+
+        print b; // Nil
+        print c = 2; // print true
+        print c; // prints 2
+        "#;
+        lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
+        let tokens = lexer.get_tokens();
+        let mut parser = Parser::new(tokens);
+        let program = parse(&mut parser).unwrap();
+        let result = interpret(program);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_chapter8_challenge3() {
+        let mut lexer = Lexer::new();
+        let input = r#"
+        var a = 1;
+        {
+            var a = a + 2;
+            print a;
+        }
         "#;
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();
