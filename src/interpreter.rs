@@ -501,4 +501,20 @@ mod tests {
         let result = interpret(program);
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_for_loop() {
+        let input = r#"
+        for(var i = 0; i < 3; i = i + 1){
+            print i;
+        }
+
+        for(var i = 1; i < 3; i = i + 1)
+            print i;
+        "#;
+        let mut parser = parser_setup(input);
+        let program = parse(&mut parser).unwrap();
+        let result = interpret(program);
+        assert!(result.is_ok());
+    }
 }

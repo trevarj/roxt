@@ -171,7 +171,37 @@ fn stmt(p: &mut Parser, keyword: TokenType) -> Result<Stmt> {
                 anyhow::bail!(ParseError::UnexpectedEOF)
             };
 
-            Stmt::ForStmt(Box::new(initializer), condition, increment, Box::new(body))
+            // desugar to while
+            //
+            // block
+            //  initialization
+            //  while (condition) 
+            //      block
+            //         body
+            //         increment
+            let mut outter_block: Vec<Declaration> = Vec::new();
+            if let Some(initializer) = initializer {
+                outter_block.push(initializer)
+            }
+
+            let mut inner_block: Vec<Declaration> = Vec::new();
+            inner_block.push(Declaration::Statement(body));
+            if let Some(increment) = increment {
+                inner_block.push(Declaration::Statement(Stmt::ExprStmt(increment)));
+            }
+            
+            let whilestmt = Declaration::Statement(Stmt::WhileStmt(
+                if let Some(condition) = condition {
+                    condition
+                } else {
+                    Expr::Literal(Atom::Boolean(true))
+                },
+                Box::new(Stmt::Block(inner_block))
+            ));
+
+            outter_block.push(whilestmt);
+            
+            Stmt::Block(outter_block)
         }
         TokenType::Print => {
             p.expect(TokenType::Print)?;
