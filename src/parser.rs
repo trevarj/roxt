@@ -15,6 +15,8 @@ enum ParseError {
     ExpectedIdentiferForVar { token: TokenType },
     #[error("Unexpected EOF.")]
     UnexpectedEOF,
+    #[error("Error with for-loop initializer.")]
+    ForLoopInitializerError,
 }
 pub struct Parser {
     tokens: Vec<Token>,
@@ -108,7 +110,7 @@ fn stmt(p: &mut Parser, keyword: TokenType) -> Result<Stmt> {
             } else {
                 anyhow::bail!(ParseError::UnexpectedEOF);
             }
-        },
+        }
         TokenType::While => {
             p.expect(TokenType::While)?;
             p.expect(TokenType::LeftParen)?;
@@ -120,6 +122,56 @@ fn stmt(p: &mut Parser, keyword: TokenType) -> Result<Stmt> {
             } else {
                 anyhow::bail!(ParseError::UnexpectedEOF);
             }
+        }
+        TokenType::For => {
+            p.expect(TokenType::For)?;
+            p.expect(TokenType::LeftParen)?;
+
+            let initializer = if let Some(next_token) = p.peek() {
+                match next_token.token {
+                    TokenType::Semicolon => {
+                        p.expect(TokenType::Semicolon)?;
+                        None
+                    }
+                    TokenType::Var => Some(declaration(p, next_token.token)?),
+                    _ => {
+                        let expr = expr(p)?;
+                        Some(Declaration::Statement(Stmt::ExprStmt(expr)))
+                    }
+                }
+            } else {
+                anyhow::bail!(ParseError::ForLoopInitializerError)
+            };
+
+            let condition = if let Some(Token {
+                token: TokenType::Semicolon,
+                ..
+            }) = p.peek()
+            {
+                None
+            } else {
+                Some(expr(p)?)
+            };
+            p.expect(TokenType::Semicolon)?;
+
+            let increment = if let Some(Token {
+                token: TokenType::RightParen,
+                ..
+            }) = p.peek()
+            {
+                None
+            } else {
+                Some(expr(p)?)
+            };
+            p.expect(TokenType::RightParen)?;
+
+            let body = if let Some(next_token) = p.peek() {
+                stmt(p, next_token.token)?
+            } else {
+                anyhow::bail!(ParseError::UnexpectedEOF)
+            };
+
+            Stmt::ForStmt(Box::new(initializer), condition, increment, Box::new(body))
         }
         TokenType::Print => {
             p.expect(TokenType::Print)?;
@@ -400,5 +452,26 @@ mod test {
         let program = parse(&mut parser);
         println!("{:#?}", program);
         assert!(program.is_ok());
+    }
+
+    #[test]
+    fn test_for_loop() {
+        let input = r#"
+        for(var i = 0; i < 3; i = i + 1) {
+            print i;
+        }
+
+        for(;;)
+            print i;
+
+        var b = 10;
+        for(b = 0; b = b + 1) {
+            print b;
+        }
+        "#;
+        let mut parser = parser_setup(input);
+        let program = parse(&mut parser).unwrap();
+        println!("{:#?}", program);
+        // assert!(program.is_ok());
     }
 }

@@ -1,7 +1,7 @@
 use super::atom::Atom;
 use crate::tokens::{LiteralType, TokenType};
 use std::fmt::Display;
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Expr {
     Grouping(Box<Expr>),
     Binary(Box<Expr>, TokenType, Box<Expr>),
