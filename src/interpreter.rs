@@ -82,7 +82,6 @@ fn evaluate_statement(stmt: &Stmt, env: &Env) -> Result<()> {
                 evaluate_statement(&stmt, env)?
             }
         }
-        Stmt::ForStmt(_, _, _, _) => todo!(),
         Stmt::PrintStmt(expr) => {
             if let Expr::Literal(atom) = expr {
                 let value = if let Atom::Identifier(id) = atom {
@@ -140,6 +139,7 @@ fn evaluate_expr(expr: &Expr, env: &Env) -> Result<Atom> {
             let atom = evaluate_expr(&expr, env)?;
             evaluate_unary(op, atom)
         }
+        Expr::Call(_, _) => todo!(),
         Expr::Literal(a) => {
             if let Atom::Identifier(ref id) = a {
                 if let Some(var) = env.get_var(&id) {
@@ -287,6 +287,16 @@ fn evaluate_binary(op: &TokenType, lhs: Atom, rhs: Atom, env: &Env) -> Result<At
                 rhs: b
             }),
         },
+        TokenType::Dot => match (lhs, rhs) {
+            (Atom::Identifier(a), Atom::Identifier(b)) => {
+                todo!()
+            },
+            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
+                op: ".".to_string(),
+                lhs: a,
+                rhs: b
+            }),
+        }
         op => anyhow::bail!(RuntimeError::InvalidOperator { op: op.to_owned() }),
     })
 }

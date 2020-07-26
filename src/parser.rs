@@ -17,6 +17,8 @@ enum ParseError {
     UnexpectedEOF,
     #[error("Error with for-loop initializer.")]
     ForLoopInitializerError,
+    #[error("Exceeded maximum arg count.")]
+    MaxArgCountError,
 }
 pub struct Parser {
     tokens: Vec<Token>,
@@ -251,8 +253,9 @@ fn expr_bp(p: &mut Parser, min_bp: u8) -> Result<Expr> {
                 | TokenType::GreaterEqual
                 | TokenType::Or
                 | TokenType::And
-                | TokenType::Equal => token.token,
-                TokenType::EOF | TokenType::RightParen | TokenType::Semicolon => break,
+                | TokenType::Equal
+                | TokenType::Dot => token.token,
+                TokenType::EOF | TokenType::RightParen | TokenType::Comma | TokenType::Semicolon => break,
                 t => anyhow::bail!(ParseError::UnexpectedToken {
                     token: t,
                     line: token.line
@@ -298,6 +301,7 @@ fn infix_binding_power(ttype: &TokenType) -> Option<(u8, u8)> {
         | TokenType::GreaterEqual => Some((2, 3)),
         TokenType::Plus | TokenType::Minus => Some((4, 5)),
         TokenType::Star | TokenType::Slash => Some((6, 7)),
+        TokenType::Dot => Some((9, 8)),
         _ => None,
     }
 }
@@ -310,12 +314,45 @@ fn unary(p: &mut Parser) -> Result<Expr> {
             let rhs = expr_bp(p, r_bp)?;
             Ok(Expr::Unary(token.token.clone(), Box::new(rhs)))
         } else {
-            primary(p)
+            call(p)
         };
         lhs
     } else {
         anyhow::bail!(ParseError::BadState)
     }
+}
+
+fn call(p: &mut Parser) -> Result<Expr> {
+    let callee = primary(p)?;
+    Ok(if let Some(Token { token: TokenType::LeftParen, ..}) = p.peek() {
+        p.expect(TokenType::LeftParen)?;
+        if let Some(Token { token: TokenType::RightParen, ..}) = p.peek() {
+            p.expect(TokenType::RightParen)?;
+            Expr::Call(Box::new(callee), None)
+        } else {
+            let mut args: Vec<Expr> = Vec::new();
+            while let Some(token) = p.peek() {
+                if let TokenType::RightParen = token.token {
+                    p.expect(TokenType::RightParen)?;
+                    break;
+                } else if args.len() < 255 {
+                    let expr = expr(p)?;
+                    args.push(expr);
+                    if let Some(Token {token: TokenType::RightParen, ..}) = p.peek() {
+                        break;
+                    } else {
+                        p.expect(TokenType::Comma)?;
+                    }
+                } else {
+                    anyhow::bail!(ParseError::MaxArgCountError)
+                }
+            }
+            p.expect(TokenType::RightParen)?;
+            Expr::Call(Box::new(callee), Some(args))
+        }
+    } else {
+        callee
+    })
 }
 
 fn primary(p: &mut Parser) -> Result<Expr> {
@@ -441,6 +478,24 @@ mod test {
     }
 
     #[test]
+    fn test_function_composition_expr() {
+        let mut parser = parser_setup("a.b.c");
+        assert_eq!(expr(&mut parser).unwrap().to_string(), "(. a (. b c))");
+    }
+
+    #[test]
+    fn test_function_call() {
+        let mut parser = parser_setup("foo(1+1, b)");
+        assert_eq!(expr(&mut parser).unwrap().to_string(), "foo((+ 1 1), b)");
+    }
+
+    #[test]
+    fn test_function_member_call_combo() {
+        let mut parser = parser_setup("foo().bar(a, b, c)");
+        assert_eq!(expr(&mut parser).unwrap().to_string(), "(. foo() bar(a, b, c))");
+    }
+
+    #[test]
     fn test_var_declaration() {
         let mut parser = parser_setup("var i = 1 + 6 / 2; var b;");
         let program = parse(&mut parser);
@@ -480,7 +535,7 @@ mod test {
         "#;
         let mut parser = parser_setup(input);
         let program = parse(&mut parser);
-        println!("{:#?}", program);
+        // println!("{:#?}", program);
         assert!(program.is_ok());
     }
 
@@ -500,8 +555,8 @@ mod test {
         }
         "#;
         let mut parser = parser_setup(input);
-        let program = parse(&mut parser).unwrap();
-        println!("{:#?}", program);
-        // assert!(program.is_ok());
+        let program = parse(&mut parser);
+        // println!("{:#?}", program);
+        assert!(program.is_ok());
     }
 }

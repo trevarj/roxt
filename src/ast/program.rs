@@ -15,12 +15,6 @@ pub enum Stmt {
     ExprStmt(Expr),
     IfStmt(Expr, Box<Stmt>, Option<Box<Stmt>>),
     WhileStmt(Expr, Box<Stmt>),
-    ForStmt(
-        Box<Option<Declaration>>,
-        Option<Expr>,
-        Option<Expr>,
-        Box<Stmt>,
-    ),
     PrintStmt(Expr),
     Block(Vec<Declaration>),
 }

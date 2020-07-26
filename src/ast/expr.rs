@@ -6,6 +6,7 @@ pub enum Expr {
     Grouping(Box<Expr>),
     Binary(Box<Expr>, TokenType, Box<Expr>),
     Unary(TokenType, Box<Expr>),
+    Call(Box<Expr>, Option<Vec<Expr>>),
     Literal(Atom),
 }
 
@@ -27,6 +28,7 @@ impl Display for Expr {
                     TokenType::GreaterEqual => ">=",
                     TokenType::And => "and",
                     TokenType::Or => "or",
+                    TokenType::Dot => ".",
                     TokenType::Literal(LiteralType::Identifier(id)) => id,
                     _ => panic!("Cannot display this operator: {:?}.", op),
                 };
@@ -39,6 +41,14 @@ impl Display for Expr {
                     _ => panic!("Cannot display this operator."),
                 };
                 write!(f, "({}{})", op, expr)?
+            }
+            Expr::Call(callee, args) => {
+                if let Some(args) = args {
+                    let arg_list = args.iter().map(|arg| arg.to_string()).collect::<Vec<String>>().join(", ");
+                    write!(f, "{}({})", callee, arg_list)?
+                } else {
+                    write!(f, "{}()", callee)?
+                }
             }
             Expr::Literal(atom) => write!(f, "{}", atom)?,
         })
