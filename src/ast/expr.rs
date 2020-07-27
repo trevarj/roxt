@@ -45,9 +45,9 @@ impl Display for Expr {
             Expr::Call(callee, args) => {
                 if let Some(args) = args {
                     let arg_list = args.iter().map(|arg| arg.to_string()).collect::<Vec<String>>().join(", ");
-                    write!(f, "{}({})", callee, arg_list)?
+                    write!(f, "(call({}) {})", arg_list, callee)?
                 } else {
-                    write!(f, "{}()", callee)?
+                    write!(f, "(call() {})", callee)?
                 }
             }
             Expr::Literal(atom) => write!(f, "{}", atom)?,

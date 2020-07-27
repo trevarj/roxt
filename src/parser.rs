@@ -254,13 +254,24 @@ fn expr_bp(p: &mut Parser, min_bp: u8) -> Result<Expr> {
                 | TokenType::Or
                 | TokenType::And
                 | TokenType::Equal
-                | TokenType::Dot => token.token,
+                | TokenType::Dot 
+                | TokenType::LeftParen => token.token,
                 TokenType::EOF | TokenType::RightParen | TokenType::Comma | TokenType::Semicolon => break,
                 t => anyhow::bail!(ParseError::UnexpectedToken {
                     token: t,
                     line: token.line
                 }),
             };
+
+            if let Some((l_bp, ())) = postfix_binding_power(&op) {
+                if l_bp < min_bp {
+                    break;
+                }
+                // p.next();
+                
+                lhs = call(p, lhs)?;
+                continue;
+            }
 
             if let Some((l_bp, r_bp)) = infix_binding_power(&op) {
                 if l_bp < min_bp {
@@ -280,12 +291,19 @@ fn expr_bp(p: &mut Parser, min_bp: u8) -> Result<Expr> {
 
 fn prefix_binding_power(token: &Token) -> Result<((), u8)> {
     Ok(match &token.token {
-        TokenType::Bang | TokenType::Minus => ((), 7),
+        TokenType::Bang | TokenType::Minus => ((), 8),
         t => anyhow::bail!(ParseError::UnexpectedToken {
             token: t.clone(),
             line: token.line
         }),
     })
+}
+
+fn postfix_binding_power(token: &TokenType) -> Option<(u8, ())> {
+    match &token {
+        TokenType::LeftParen => Some((12, ())),
+        _ => None,
+    }
 }
 
 fn infix_binding_power(ttype: &TokenType) -> Option<(u8, u8)> {
@@ -301,7 +319,7 @@ fn infix_binding_power(ttype: &TokenType) -> Option<(u8, u8)> {
         | TokenType::GreaterEqual => Some((2, 3)),
         TokenType::Plus | TokenType::Minus => Some((4, 5)),
         TokenType::Star | TokenType::Slash => Some((6, 7)),
-        TokenType::Dot => Some((9, 8)),
+        TokenType::Dot => Some((10, 11)),
         _ => None,
     }
 }
@@ -314,7 +332,8 @@ fn unary(p: &mut Parser) -> Result<Expr> {
             let rhs = expr_bp(p, r_bp)?;
             Ok(Expr::Unary(token.token.clone(), Box::new(rhs)))
         } else {
-            call(p)
+            // call(p)
+            primary(p)
         };
         lhs
     } else {
@@ -322,8 +341,8 @@ fn unary(p: &mut Parser) -> Result<Expr> {
     }
 }
 
-fn call(p: &mut Parser) -> Result<Expr> {
-    let callee = primary(p)?;
+fn call(p: &mut Parser, callee: Expr) -> Result<Expr> {
+    // let callee = primary(p)?;
     Ok(if let Some(Token { token: TokenType::LeftParen, ..}) = p.peek() {
         p.expect(TokenType::LeftParen)?;
         if let Some(Token { token: TokenType::RightParen, ..}) = p.peek() {
@@ -480,19 +499,25 @@ mod test {
     #[test]
     fn test_function_composition_expr() {
         let mut parser = parser_setup("a.b.c");
-        assert_eq!(expr(&mut parser).unwrap().to_string(), "(. a (. b c))");
+        assert_eq!(expr(&mut parser).unwrap().to_string(), "(. (. a b) c)");
     }
 
     #[test]
     fn test_function_call() {
         let mut parser = parser_setup("foo(1+1, b)");
-        assert_eq!(expr(&mut parser).unwrap().to_string(), "foo((+ 1 1), b)");
+        assert_eq!(expr(&mut parser).unwrap().to_string(), "(call((+ 1 1), b) foo)");
+    }
+
+    #[test]
+    fn test_function_currying() {
+        let mut parser = parser_setup("foo()()()");
+        assert_eq!(expr(&mut parser).unwrap().to_string(), "(call() (call() (call() foo)))");
     }
 
     #[test]
     fn test_function_member_call_combo() {
         let mut parser = parser_setup("foo().bar(a, b, c)");
-        assert_eq!(expr(&mut parser).unwrap().to_string(), "(. foo() bar(a, b, c))");
+        assert_eq!(expr(&mut parser).unwrap().to_string(), "(. (call() foo) (call(a, b, c) bar))");
     }
 
     #[test]
