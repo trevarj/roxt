@@ -1,20 +1,37 @@
-use super::ast::Atom;
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use super::ast::{Atom, Stmt};
+use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
 
 pub type Spaghetti = Rc<RefCell<Option<Meatball>>>;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Meatball {
     parent: Spaghetti,
-    local: HashMap<String, Atom>,
+    local: HashMap<String, Object>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Object {
+    /// Atomic value
+    Atom(Atom),
+    /// Function arity, block
+    Function(Vec<String>, Stmt),
+}
+
+impl Display for Object {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Object::Atom(a) => write!(f, "{}", a),
+            Object::Function(_, _) => write!(f, "<function>"),
+        }
+    }
 }
 
 pub trait Parental {
     fn new_instance() -> Spaghetti;
     fn child(&self) -> Spaghetti;
-    fn declare_var(&self, id: String, val: Atom);
-    fn update_var(&self, id: String, val: Atom);
-    fn get_var(&self, id: &str) -> Option<Atom>;
+    fn declare(&self, id: String, val: Object);
+    fn update(&self, id: String, val: Object);
+    fn get(&self, id: &str) -> Option<Object>;
 }
 
 impl Meatball {
@@ -25,32 +42,33 @@ impl Meatball {
         }
     }
 
-    /// Locally insert new variable
-    pub fn insert_var(&mut self, name: String, value: Atom) {
+    /// Locally insert new Object
+    pub fn insert(&mut self, name: String, value: Object) {
         self.local.insert(name, value);
     }
 
     /// Updates locally, or cascades up to ancestors to update at the first one found
-    pub fn update_cascade(&mut self, name: String, value: Atom) {
-        let var = self.local.get_mut(&name);
-        if let Some(var) = var {
-            *var = value;
+    pub fn update_cascade(&mut self, name: String, value: Object) {
+        if let Some(obj) = self.local.get_mut(&name).as_deref_mut() {
+            *obj = value;
         } else {
             if let Some(parent) = self.parent.borrow_mut().as_mut() {
                 parent.update_cascade(name, value);
             }
         }
     }
-
+ 
     /// Searches local map or searches through ancestors
-    pub fn find_var(&self, name: &str) -> Option<Atom> {
-        let mut var = self.local.get(name).cloned();
-        if var.is_none() {
+    pub fn find(&self, name: &str) -> Option<Object> {
+        if let Some(obj) = self.local.get(name).cloned() {
+            Some(obj)
+        } else {
             if let Some(parent) = self.parent.borrow().as_ref() {
-                var = parent.find_var(name);
+                parent.find(name)
+            } else {
+                None
             }
         }
-        var
     }
 }
 
@@ -64,15 +82,15 @@ impl Parental for Spaghetti {
             parent: self.clone(),
         })))
     }
-    fn declare_var(&self, id: String, val: Atom) {
-        self.borrow_mut().as_mut().unwrap().insert_var(id, val)
+    fn declare(&self, id: String, val: Object) {
+        self.borrow_mut().as_mut().unwrap().insert(id, val)
     }
-    fn update_var(&self, id: String, val: Atom) {
+    fn update(&self, id: String, val: Object) {
         self.borrow_mut().as_mut().unwrap().update_cascade(id, val)
     }
-    fn get_var(&self, id: &str) -> Option<Atom> {
+    fn get(&self, id: &str) -> Option<Object> {
         if let Some(meat) = self.borrow().as_ref() {
-            meat.find_var(id)
+            meat.find(id)
         } else {
             None
         }
@@ -85,20 +103,23 @@ mod tests {
     #[test]
     fn test_creation_and_fetch_var_from_parent() {
         let meatball = Spaghetti::new_instance();
-        meatball.declare_var("var1".to_string(), Atom::Boolean(true));
+        meatball.declare("var1".to_string(), Object::Atom(Atom::Boolean(true)));
 
         let childmeat = meatball.child();
-        let parent_val = childmeat.get_var("var1").unwrap();
-        assert_eq!(parent_val, Atom::Boolean(true));
+        let parent_val = childmeat.get("var1").unwrap();
+        assert_eq!(parent_val, Object::Atom(Atom::Boolean(true)));
     }
 
     #[test]
     fn test_updating_globally() {
         let meatball = Spaghetti::new_instance();
-        meatball.declare_var("var1".to_string(), Atom::Boolean(true));
+        meatball.declare("var1".to_string(), Object::Atom(Atom::Boolean(true)));
 
         let child = meatball.child();
-        child.update_var("var1".to_string(), Atom::Boolean(false));
-        assert_eq!(meatball.get_var("var1").unwrap(), Atom::Boolean(false));
+        child.update("var1".to_string(), Object::Atom(Atom::Boolean(false)));
+        assert_eq!(
+            meatball.get("var1").unwrap(),
+            Object::Atom(Atom::Boolean(false))
+        );
     }
 }

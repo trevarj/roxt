@@ -1,6 +1,6 @@
 use super::{
     ast::{Atom, Declaration, Expr, Program, Stmt},
-    environment::{Parental, Spaghetti},
+    environment::{Object, Parental, Spaghetti},
     tokens::TokenType,
 };
 use anyhow::Result;
@@ -22,6 +22,20 @@ enum RuntimeError {
     InvalidVarDeclaration { expr: Expr },
     #[error("Invalid condition for if-else, {found:?}")]
     InvalidIfCondition { found: Atom },
+    #[error("Function declaration {found:?} not found")]
+    FunctionDeclarationNotFound { found: String },
+    #[error("Invalid callee type {found:?}")]
+    InvalidCalleeType { found: Atom },
+    #[error("Invalid number of arguments provided. Found {found:?}, required {req:?}.")]
+    InvalidNumberOfArgs { found: usize, req: usize },
+}
+
+/// Stupid way to return from function
+#[derive(Error, Debug)]
+enum Return {
+    // Call expr will catch this
+    #[error("Unable to return from function context, value - {0}")]
+    Return(Atom)
 }
 
 type Env = Spaghetti;
@@ -36,17 +50,20 @@ pub fn interpret(program: Program) -> Result<()> {
 
 fn evaluate_declaration(decl: &Declaration, env: &Env) -> Result<()> {
     Ok(match decl {
+        Declaration::FunDecl(id, arity, body) => {
+            env.declare(id.to_owned(), Object::Function(arity.to_owned(), body.to_owned()))
+        },
         Declaration::VarDecl(id, stmt) => {
             if let Stmt::ExprStmt(expr) = stmt {
                 match expr {
                     Expr::Binary(_, _, rhs) => {
                         // declare and assign
                         let val = evaluate_expr(&rhs, &env)?;
-                        env.declare_var(id.to_owned(), val);
+                        env.declare(id.to_owned(), Object::Atom(val));
                     }
                     Expr::Literal(_) => {
                         // declaration, no assignment
-                        env.declare_var(id.to_owned(), Atom::Nil)
+                        env.declare(id.to_owned(), Object::Atom(Atom::Nil))
                     }
                     expr => {
                         anyhow::bail!(RuntimeError::InvalidVarDeclaration { expr: expr.clone() })
@@ -81,11 +98,18 @@ fn evaluate_statement(stmt: &Stmt, env: &Env) -> Result<()> {
             while let Atom::Boolean(true) = evaluate_expr(&cond, &env)? {
                 evaluate_statement(&stmt, env)?
             }
+        },
+        Stmt::ReturnStmt(expr) => {
+            let mut val = Atom::Nil;
+            if let Some(expr) = expr {
+                val = evaluate_expr(expr, env)?;
+            }
+            anyhow::bail!(Return::Return(val))
         }
         Stmt::PrintStmt(expr) => {
             if let Expr::Literal(atom) = expr {
                 let value = if let Atom::Identifier(id) = atom {
-                    if let Some(var) = env.get_var(id.as_str()) {
+                    if let Some(var) = env.get(id.as_str()) {
                         var.to_string()
                     } else {
                         anyhow::bail!(RuntimeError::UndefinedVar { id: id.to_owned() })
@@ -115,9 +139,9 @@ fn evaluate_expr(expr: &Expr, env: &Env) -> Result<Atom> {
         Expr::Binary(lhs, op, rhs) => {
             // Special case for assignment
             if let (Expr::Literal(Atom::Identifier(id)), TokenType::Equal) = (lhs.as_ref(), op) {
-                if env.get_var(id).is_some() {
+                if env.get(id).is_some() {
                     let right = evaluate_expr(rhs, env)?;
-                    env.update_var(id.to_string(), right);
+                    env.update(id.to_string(), Object::Atom(right));
                     return Ok(Atom::Boolean(true));
                 } else {
                     anyhow::bail!(RuntimeError::UndefinedVar { id: id.to_string() })
@@ -139,14 +163,60 @@ fn evaluate_expr(expr: &Expr, env: &Env) -> Result<Atom> {
             let atom = evaluate_expr(&expr, env)?;
             evaluate_unary(op, atom)
         }
-        Expr::Call(_, _) => todo!(),
+        Expr::Call(callee_expr, args) => {
+            // evaluate callee expression
+            let callee = evaluate_expr(callee_expr, env)?;
+            // validate that the callee is an identifier
+            // TODO: possibly support some built-in functions on other Atom types
+            if let Atom::Identifier(id) = callee {
+                // get the function from the env, verify it is a function
+                if let Some(Object::Function(params, stmt)) = env.get(&id) {
+                    // create new env, pass args to it
+                    let func_scope = env.child();
+                    if let Some(args) = args {
+                        // check arity
+                        anyhow::ensure!(params.len() == args.len(), RuntimeError::InvalidNumberOfArgs {found: args.len(), req: params.len()});
+                        for (arg, id) in args.iter().zip(params) {
+                            let val = evaluate_expr(arg, env)?;
+                            func_scope.declare(id, Object::Atom(val))
+                        }
+                    }
+                    // evaluate function block
+                    let ret = evaluate_statement(&stmt,&func_scope);
+                    if let Err(e) = ret {
+                        // get return value
+                        if let Some(Return::Return(val)) = e.downcast_ref::<Return>() {
+                            Ok(val.clone())
+                        } else {
+                            anyhow::bail!(e)
+                        }
+                    } else {
+                        // void return
+                        Ok(Atom::Nil)
+                    }
+                } else {
+                    // func declaration not found
+                    anyhow::bail!(RuntimeError::FunctionDeclarationNotFound { found: id})
+                }
+            } else {
+                // invalid callee type
+                anyhow::bail!(RuntimeError::InvalidCalleeType {found: callee})
+            }
+        },
         Expr::Literal(a) => {
             if let Atom::Identifier(ref id) = a {
-                if let Some(var) = env.get_var(&id) {
-                    if let Atom::Nil = var {
-                        Ok(a.to_owned())
-                    } else {
-                        Ok(var)
+                if let Some(object) = env.get(&id) {
+                    match object {
+                        Object::Atom(val) => {
+                            if let Atom::Nil = val {
+                                Ok(a.to_owned())
+                            } else {
+                                Ok(val.to_owned())
+                            }
+                        }
+                        Object::Function(params, stmt) => {
+                            Ok(Atom::Identifier(id.to_string()))
+                        },
                     }
                 } else {
                     anyhow::bail!(RuntimeError::UndefinedVar { id: id.to_string() })
@@ -189,6 +259,8 @@ fn evaluate_binary(op: &TokenType, lhs: Atom, rhs: Atom, env: &Env) -> Result<At
         TokenType::Plus => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Number(a + b),
             (Atom::String(a), Atom::String(b)) => Atom::String(a + &b),
+            (Atom::String(a), Atom::Number(b)) => Atom::String(a + &b.to_string()),
+            (Atom::Number(a), Atom::String(b)) => Atom::String(a.to_string() + &b),
             (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
                 op: "+".to_string(),
                 lhs: a,
@@ -288,15 +360,13 @@ fn evaluate_binary(op: &TokenType, lhs: Atom, rhs: Atom, env: &Env) -> Result<At
             }),
         },
         TokenType::Dot => match (lhs, rhs) {
-            (Atom::Identifier(a), Atom::Identifier(b)) => {
-                todo!()
-            },
+            (Atom::Identifier(a), Atom::Identifier(b)) => todo!(),
             (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
                 op: ".".to_string(),
                 lhs: a,
                 rhs: b
             }),
-        }
+        },
         op => anyhow::bail!(RuntimeError::InvalidOperator { op: op.to_owned() }),
     })
 }
@@ -521,6 +591,41 @@ mod tests {
 
         for(var i = 1; i < 3; i = i + 1)
             print i;
+        "#;
+        let mut parser = parser_setup(input);
+        let program = parse(&mut parser).unwrap();
+        let result = interpret(program);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_function_declaration_and_call() {
+        let input = r#"
+        var a = "hello world";
+        fun foo() {
+            print a;
+            return 1;
+        }
+        var r = foo();
+        print r;
+        "#;
+        let mut parser = parser_setup(input);
+        let program = parse(&mut parser).unwrap();
+        let result = interpret(program);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_fibonacci() {
+        let input = r#"
+        fun fib(n) {
+            if (n <= 1) return n;
+            return fib(n - 2) + fib(n - 1);
+        }
+          
+        for (var i = 0; i < 20; i = i + 1) {
+            print fib(i);
+        }
         "#;
         let mut parser = parser_setup(input);
         let program = parse(&mut parser).unwrap();

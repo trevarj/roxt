@@ -13,6 +13,8 @@ enum ParseError {
     UnexpectedToken { token: TokenType, line: usize },
     #[error("Expecting identifier after 'var', found {token:?}.")]
     ExpectedIdentiferForVar { token: TokenType },
+    #[error("Expecting identifier after 'fun', found {token:?}.")]
+    ExpectedIdentiferForFun { token: TokenType },
     #[error("Unexpected EOF.")]
     UnexpectedEOF,
     #[error("Error with for-loop initializer.")]
@@ -68,6 +70,46 @@ pub fn parse(p: &mut Parser) -> Result<Program> {
 
 fn declaration(p: &mut Parser, keyword: TokenType) -> Result<Declaration> {
     Ok(match keyword {
+        TokenType::Fun => {
+            p.expect(TokenType::Fun)?;
+            if let Some(token) = p.peek() {
+                // check for function identifier
+                if let Some(Token {token: TokenType::Literal(LiteralType::Identifier(func_id)),.. }) = p.next() {
+                    p.expect(TokenType::LeftParen)?;
+                    // check for params
+                    let mut params: Vec<String> = Vec::new();
+                    while let Some(token) = p.peek() {
+                        if let TokenType::Literal(LiteralType::Identifier(id)) = token.token {
+                            // store identifier
+                            params.push(id);
+                            // consume current identifier
+                            p.next();
+                            // check for closing paren or comma
+                            if let Some(Token { token: TokenType::RightParen, ..} ) = p.peek() {
+                                p.expect(TokenType::RightParen)?;
+                                break;
+                            } else {
+                                // expect comma to continue parsing parameters
+                                p.expect(TokenType::Comma)?;
+                            }
+                        } else {
+                            // if no parameter identifier, expect closing paren and break
+                            p.expect(TokenType::RightParen)?;
+                            break;
+                        }
+                    }
+
+                    // get function body
+                    // expect function block
+                    let block = stmt(p, TokenType::LeftBrace)?;
+                    Declaration::FunDecl(func_id, params, block)
+                } else {
+                    anyhow::bail!(ParseError::ExpectedIdentiferForFun { token: token.token })
+                }
+            } else {
+                anyhow::bail!(ParseError::UnexpectedEOF)
+            }
+        }
         TokenType::Var => {
             p.expect(TokenType::Var)?;
             if let Some(token) = p.peek() {
@@ -79,7 +121,7 @@ fn declaration(p: &mut Parser, keyword: TokenType) -> Result<Declaration> {
                     anyhow::bail!(ParseError::ExpectedIdentiferForVar { token: token.token })
                 }
             } else {
-                anyhow::bail!(ParseError::BadState)
+                anyhow::bail!(ParseError::UnexpectedEOF)
             }
         }
         _ => Declaration::Statement(stmt(p, keyword)?),
@@ -177,13 +219,13 @@ fn stmt(p: &mut Parser, keyword: TokenType) -> Result<Stmt> {
             //
             // block
             //  initialization
-            //  while (condition) 
+            //  while (condition)
             //      block
             //         body
             //         increment
-            let mut outter_block: Vec<Declaration> = Vec::new();
+            let mut outer_block: Vec<Declaration> = Vec::new();
             if let Some(initializer) = initializer {
-                outter_block.push(initializer)
+                outer_block.push(initializer)
             }
 
             let mut inner_block: Vec<Declaration> = Vec::new();
@@ -191,20 +233,31 @@ fn stmt(p: &mut Parser, keyword: TokenType) -> Result<Stmt> {
             if let Some(increment) = increment {
                 inner_block.push(Declaration::Statement(Stmt::ExprStmt(increment)));
             }
-            
+
             let whilestmt = Declaration::Statement(Stmt::WhileStmt(
                 if let Some(condition) = condition {
                     condition
                 } else {
                     Expr::Literal(Atom::Boolean(true))
                 },
-                Box::new(Stmt::Block(inner_block))
+                Box::new(Stmt::Block(inner_block)),
             ));
 
-            outter_block.push(whilestmt);
-            
-            Stmt::Block(outter_block)
-        }
+            outer_block.push(whilestmt);
+
+            Stmt::Block(outer_block)
+        },
+        TokenType::Return => {
+            p.expect(TokenType::Return)?;
+            if let Some(Token { token: TokenType::Semicolon, ..}) = p.peek() {
+                p.expect(TokenType::Semicolon)?;
+                Stmt::ReturnStmt(None)
+            } else {
+                let ret_expr = expr(p)?;
+                p.expect(TokenType::Semicolon)?;
+                Stmt::ReturnStmt(Some(ret_expr))
+            }
+        },
         TokenType::Print => {
             p.expect(TokenType::Print)?;
             let expr = expr(p)?;
@@ -254,9 +307,12 @@ fn expr_bp(p: &mut Parser, min_bp: u8) -> Result<Expr> {
                 | TokenType::Or
                 | TokenType::And
                 | TokenType::Equal
-                | TokenType::Dot 
+                | TokenType::Dot
                 | TokenType::LeftParen => token.token,
-                TokenType::EOF | TokenType::RightParen | TokenType::Comma | TokenType::Semicolon => break,
+                TokenType::EOF
+                | TokenType::RightParen
+                | TokenType::Comma
+                | TokenType::Semicolon => break,
                 t => anyhow::bail!(ParseError::UnexpectedToken {
                     token: t,
                     line: token.line
@@ -268,7 +324,7 @@ fn expr_bp(p: &mut Parser, min_bp: u8) -> Result<Expr> {
                     break;
                 }
                 // p.next();
-                
+                // 
                 lhs = call(p, lhs)?;
                 continue;
             }
@@ -342,36 +398,49 @@ fn unary(p: &mut Parser) -> Result<Expr> {
 }
 
 fn call(p: &mut Parser, callee: Expr) -> Result<Expr> {
-    // let callee = primary(p)?;
-    Ok(if let Some(Token { token: TokenType::LeftParen, ..}) = p.peek() {
-        p.expect(TokenType::LeftParen)?;
-        if let Some(Token { token: TokenType::RightParen, ..}) = p.peek() {
-            p.expect(TokenType::RightParen)?;
-            Expr::Call(Box::new(callee), None)
-        } else {
-            let mut args: Vec<Expr> = Vec::new();
-            while let Some(token) = p.peek() {
-                if let TokenType::RightParen = token.token {
-                    p.expect(TokenType::RightParen)?;
-                    break;
-                } else if args.len() < 255 {
-                    let expr = expr(p)?;
-                    args.push(expr);
-                    if let Some(Token {token: TokenType::RightParen, ..}) = p.peek() {
+    Ok(
+        if let Some(Token {
+            token: TokenType::LeftParen,
+            ..
+        }) = p.peek()
+        {
+            p.expect(TokenType::LeftParen)?;
+            if let Some(Token {
+                token: TokenType::RightParen,
+                ..
+            }) = p.peek()
+            {
+                p.expect(TokenType::RightParen)?;
+                Expr::Call(Box::new(callee), None)
+            } else {
+                let mut args: Vec<Expr> = Vec::new();
+                while let Some(token) = p.peek() {
+                    if let TokenType::RightParen = token.token {
+                        p.expect(TokenType::RightParen)?;
                         break;
+                    } else if args.len() < 255 {
+                        let expr = expr(p)?;
+                        args.push(expr);
+                        if let Some(Token {
+                            token: TokenType::RightParen,
+                            ..
+                        }) = p.peek()
+                        {
+                            break;
+                        } else {
+                            p.expect(TokenType::Comma)?;
+                        }
                     } else {
-                        p.expect(TokenType::Comma)?;
+                        anyhow::bail!(ParseError::MaxArgCountError)
                     }
-                } else {
-                    anyhow::bail!(ParseError::MaxArgCountError)
                 }
+                p.expect(TokenType::RightParen)?;
+                Expr::Call(Box::new(callee), Some(args))
             }
-            p.expect(TokenType::RightParen)?;
-            Expr::Call(Box::new(callee), Some(args))
-        }
-    } else {
-        callee
-    })
+        } else {
+            callee
+        },
+    )
 }
 
 fn primary(p: &mut Parser) -> Result<Expr> {
@@ -505,19 +574,37 @@ mod test {
     #[test]
     fn test_function_call() {
         let mut parser = parser_setup("foo(1+1, b)");
-        assert_eq!(expr(&mut parser).unwrap().to_string(), "(call((+ 1 1), b) foo)");
+        assert_eq!(
+            expr(&mut parser).unwrap().to_string(),
+            "(call((+ 1 1), b) foo)"
+        );
     }
 
     #[test]
     fn test_function_currying() {
         let mut parser = parser_setup("foo()()()");
-        assert_eq!(expr(&mut parser).unwrap().to_string(), "(call() (call() (call() foo)))");
+        assert_eq!(
+            expr(&mut parser).unwrap().to_string(),
+            "(call() (call() (call() foo)))"
+        );
     }
 
     #[test]
     fn test_function_member_call_combo() {
         let mut parser = parser_setup("foo().bar(a, b, c)");
-        assert_eq!(expr(&mut parser).unwrap().to_string(), "(. (call() foo) (call(a, b, c) bar))");
+        assert_eq!(
+            expr(&mut parser).unwrap().to_string(),
+            "(. (call() foo) (call(a, b, c) bar))"
+        );
+    }
+
+    #[test]
+    fn test_function_call_within_expr() {
+        let mut parser = parser_setup("foo() + 1 + bar()");
+        assert_eq!(
+            expr(&mut parser).unwrap().to_string(),
+            "(+ (+ (call() foo) 1) (call() bar))"
+        );
     }
 
     #[test]
@@ -577,6 +664,19 @@ mod test {
         var b = 10;
         for(b = 0; b = b + 1) {
             print b;
+        }
+        "#;
+        let mut parser = parser_setup(input);
+        let program = parse(&mut parser);
+        // println!("{:#?}", program);
+        assert!(program.is_ok());
+    }
+
+    #[test]
+    fn test_function_declaration() {
+        let input = r#"
+        fun foo() {
+            print i;
         }
         "#;
         let mut parser = parser_setup(input);

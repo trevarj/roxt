@@ -1,12 +1,17 @@
 use super::atom::Atom;
 use crate::tokens::{LiteralType, TokenType};
 use std::fmt::Display;
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
+    /// Expr bound by parentheses
     Grouping(Box<Expr>),
+    /// LHS, Operator, RHS
     Binary(Box<Expr>, TokenType, Box<Expr>),
+    /// Operator, Expr
     Unary(TokenType, Box<Expr>),
+    /// Expr to resolve callee, optional arguments
     Call(Box<Expr>, Option<Vec<Expr>>),
+    /// A literal value or identifier
     Literal(Atom),
 }
 
@@ -44,7 +49,11 @@ impl Display for Expr {
             }
             Expr::Call(callee, args) => {
                 if let Some(args) = args {
-                    let arg_list = args.iter().map(|arg| arg.to_string()).collect::<Vec<String>>().join(", ");
+                    let arg_list = args
+                        .iter()
+                        .map(|arg| arg.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ");
                     write!(f, "(call({}) {})", arg_list, callee)?
                 } else {
                     write!(f, "(call() {})", callee)?
