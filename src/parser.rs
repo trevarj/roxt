@@ -74,7 +74,11 @@ fn declaration(p: &mut Parser, keyword: TokenType) -> Result<Declaration> {
             p.expect(TokenType::Fun)?;
             if let Some(token) = p.peek() {
                 // check for function identifier
-                if let Some(Token {token: TokenType::Literal(LiteralType::Identifier(func_id)),.. }) = p.next() {
+                if let Some(Token {
+                    token: TokenType::Literal(LiteralType::Identifier(func_id)),
+                    ..
+                }) = p.next()
+                {
                     p.expect(TokenType::LeftParen)?;
                     // check for params
                     let mut params: Vec<String> = Vec::new();
@@ -85,7 +89,11 @@ fn declaration(p: &mut Parser, keyword: TokenType) -> Result<Declaration> {
                             // consume current identifier
                             p.next();
                             // check for closing paren or comma
-                            if let Some(Token { token: TokenType::RightParen, ..} ) = p.peek() {
+                            if let Some(Token {
+                                token: TokenType::RightParen,
+                                ..
+                            }) = p.peek()
+                            {
                                 p.expect(TokenType::RightParen)?;
                                 break;
                             } else {
@@ -246,10 +254,14 @@ fn stmt(p: &mut Parser, keyword: TokenType) -> Result<Stmt> {
             outer_block.push(whilestmt);
 
             Stmt::Block(outer_block)
-        },
+        }
         TokenType::Return => {
             p.expect(TokenType::Return)?;
-            if let Some(Token { token: TokenType::Semicolon, ..}) = p.peek() {
+            if let Some(Token {
+                token: TokenType::Semicolon,
+                ..
+            }) = p.peek()
+            {
                 p.expect(TokenType::Semicolon)?;
                 Stmt::ReturnStmt(None)
             } else {
@@ -257,7 +269,7 @@ fn stmt(p: &mut Parser, keyword: TokenType) -> Result<Stmt> {
                 p.expect(TokenType::Semicolon)?;
                 Stmt::ReturnStmt(Some(ret_expr))
             }
-        },
+        }
         TokenType::Print => {
             p.expect(TokenType::Print)?;
             let expr = expr(p)?;
@@ -324,7 +336,7 @@ fn expr_bp(p: &mut Parser, min_bp: u8) -> Result<Expr> {
                     break;
                 }
                 // p.next();
-                // 
+                //
                 lhs = call(p, lhs)?;
                 continue;
             }
