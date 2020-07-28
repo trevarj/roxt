@@ -1,5 +1,4 @@
 #![feature(peekable_next_if)]
-use anyhow::{Context, Result};
 use argh::FromArgs;
 use interpreter::interpret;
 use lexer::Lexer;
@@ -22,7 +21,7 @@ struct Args {
     source_file: Option<String>,
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Args = argh::from_env();
     println!("{:?}", args);
 
@@ -32,7 +31,7 @@ fn main() -> Result<()> {
         // Try to open file with given path
         let path = Path::new(&path);
         // Open file
-        let file = File::open(path).with_context(|| "Could not open source file.".to_string())?;
+        let file = File::open(path)?;
         // Process the file
         process_file(&file)?;
     } else {
@@ -42,26 +41,22 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn process_file(file: &File) -> Result<()> {
+fn process_file(file: &File) -> Result<(), Box<dyn std::error::Error>> {
     let mut reader = BufReader::new(file);
     let mut input = String::new();
     // Reading whole file to string...is bad...
-    reader
-        .read_to_string(&mut input)
-        .with_context(|| "Could not read file.".to_string())?;
+    reader.read_to_string(&mut input)?;
     run(&input)?;
     Ok(())
 }
 
-fn run_prompt() -> Result<()> {
+fn run_prompt() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running prompt...");
     loop {
         print!("> ");
         stdout().flush()?;
         let mut input = String::new();
-        stdin()
-            .read_line(&mut input)
-            .with_context(|| "Error reading input.".to_string())?;
+        stdin().read_line(&mut input)?;
         if input.trim().is_empty() {
             // TODO: Ask user if they really want to exit.
             println!("Exiting...");
@@ -77,7 +72,7 @@ fn run_prompt() -> Result<()> {
     Ok(())
 }
 
-fn run(source: &str) -> Result<()> {
+fn run(source: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut lexer = Lexer::new();
     lexer.scan_tokens(&mut source.chars().peekable())?;
     let tokens = lexer.get_tokens();

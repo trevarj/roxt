@@ -1,3 +1,5 @@
+use super::super::environment::Spaghetti;
+use super::Stmt;
 use std::fmt::Display;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Atom {
@@ -6,6 +8,7 @@ pub enum Atom {
     String(String),
     Boolean(bool),
     Identifier(String),
+    Function(String, Vec<String>, Box<Stmt>, Spaghetti),
 }
 
 impl Display for Atom {
@@ -16,6 +19,7 @@ impl Display for Atom {
             Atom::String(s) => write!(f, "{}", s),
             Atom::Boolean(b) => write!(f, "{}", b),
             Atom::Identifier(id) => write!(f, "{}", id),
+            Atom::Function(id, _, _, _) => write!(f, "<function: {}>", id),
         }
     }
 }

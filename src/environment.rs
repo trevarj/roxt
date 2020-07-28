@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
 
 pub type Spaghetti = Rc<RefCell<Option<Meatball>>>;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Meatball {
     parent: Spaghetti,
     local: HashMap<String, Object>,
@@ -13,15 +13,15 @@ pub struct Meatball {
 pub enum Object {
     /// Atomic value
     Atom(Atom),
-    /// Function arity, block
-    Function(Vec<String>, Stmt),
+    /// Function arity, block, closure env
+    Function(Vec<String>, Stmt, Spaghetti),
 }
 
 impl Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Object::Atom(a) => write!(f, "{}", a),
-            Object::Function(_, _) => write!(f, "<function>"),
+            Object::Function(_, _, _) => write!(f, "<function>"),
         }
     }
 }
@@ -57,7 +57,7 @@ impl Meatball {
             }
         }
     }
- 
+
     /// Searches local map or searches through ancestors
     pub fn find(&self, name: &str) -> Option<Object> {
         if let Some(obj) = self.local.get(name).cloned() {

@@ -3,11 +3,11 @@ use super::{
     environment::{Object, Parental, Spaghetti},
     tokens::TokenType,
 };
-use anyhow::Result;
+// use anyhow::Result;
+use std::result::Result;
 use thiserror::Error;
-
 #[derive(Error, Debug)]
-enum RuntimeError {
+pub enum RuntimeError {
     #[error("Invalid operand for expression - {lhs:?} {op:?} {rhs:?}")]
     InvalidOperand { op: String, lhs: Atom, rhs: Atom },
     #[error("Invalid expression operator.")]
@@ -23,24 +23,19 @@ enum RuntimeError {
     #[error("Invalid condition for if-else, {found:?}")]
     InvalidIfCondition { found: Atom },
     #[error("Function declaration {found:?} not found")]
-    FunctionDeclarationNotFound { found: String },
+    UndefinedIdentifier { found: String },
     #[error("Invalid callee type {found:?}")]
     InvalidCalleeType { found: Atom },
     #[error("Invalid number of arguments provided. Found {found:?}, required {req:?}.")]
     InvalidNumberOfArgs { found: usize, req: usize },
-}
 
-/// Stupid way to return from function
-#[derive(Error, Debug)]
-enum Return {
-    // Call expr will catch this
     #[error("Unable to return from function context, value - {0}")]
-    Return(Atom)
+    Return(Atom),
 }
 
 type Env = Spaghetti;
 
-pub fn interpret(program: Program) -> Result<()> {
+pub fn interpret(program: Program) -> Result<(), RuntimeError> {
     let env = Env::new_instance();
     for decl in program.declarations {
         evaluate_declaration(&decl, &env)?;
@@ -48,11 +43,12 @@ pub fn interpret(program: Program) -> Result<()> {
     Ok(())
 }
 
-fn evaluate_declaration(decl: &Declaration, env: &Env) -> Result<()> {
+fn evaluate_declaration(decl: &Declaration, env: &Env) -> Result<(), RuntimeError> {
     Ok(match decl {
-        Declaration::FunDecl(id, arity, body) => {
-            env.declare(id.to_owned(), Object::Function(arity.to_owned(), body.to_owned()))
-        },
+        Declaration::FunDecl(id, arity, body) => env.declare(
+            id.to_owned(),
+            Object::Function(arity.to_owned(), body.to_owned(), env.clone()),
+        ),
         Declaration::VarDecl(id, stmt) => {
             if let Stmt::ExprStmt(expr) = stmt {
                 match expr {
@@ -65,9 +61,7 @@ fn evaluate_declaration(decl: &Declaration, env: &Env) -> Result<()> {
                         // declaration, no assignment
                         env.declare(id.to_owned(), Object::Atom(Atom::Nil))
                     }
-                    expr => {
-                        anyhow::bail!(RuntimeError::InvalidVarDeclaration { expr: expr.clone() })
-                    }
+                    expr => return Err(RuntimeError::InvalidVarDeclaration { expr: expr.clone() }),
                 }
             }
         }
@@ -75,7 +69,7 @@ fn evaluate_declaration(decl: &Declaration, env: &Env) -> Result<()> {
     })
 }
 
-fn evaluate_statement(stmt: &Stmt, env: &Env) -> Result<()> {
+fn evaluate_statement(stmt: &Stmt, env: &Env) -> Result<(), RuntimeError> {
     match stmt {
         Stmt::ExprStmt(expr) => {
             evaluate_expr(&expr, &env)?;
@@ -91,20 +85,20 @@ fn evaluate_statement(stmt: &Stmt, env: &Env) -> Result<()> {
                         evaluate_statement(&else_stmt, env)?
                     }
                 }
-                res => anyhow::bail!(RuntimeError::InvalidIfCondition { found: res }),
+                res => return Err(RuntimeError::InvalidIfCondition { found: res }),
             }
         }
         Stmt::WhileStmt(cond, stmt) => {
             while let Atom::Boolean(true) = evaluate_expr(&cond, &env)? {
                 evaluate_statement(&stmt, env)?
             }
-        },
+        }
         Stmt::ReturnStmt(expr) => {
             let mut val = Atom::Nil;
             if let Some(expr) = expr {
                 val = evaluate_expr(expr, env)?;
             }
-            anyhow::bail!(Return::Return(val))
+            return Err(RuntimeError::Return(val));
         }
         Stmt::PrintStmt(expr) => {
             if let Expr::Literal(atom) = expr {
@@ -112,7 +106,7 @@ fn evaluate_statement(stmt: &Stmt, env: &Env) -> Result<()> {
                     if let Some(var) = env.get(id.as_str()) {
                         var.to_string()
                     } else {
-                        anyhow::bail!(RuntimeError::UndefinedVar { id: id.to_owned() })
+                        return Err(RuntimeError::UndefinedVar { id: id.to_owned() });
                     }
                 } else {
                     atom.to_string()
@@ -133,7 +127,7 @@ fn evaluate_statement(stmt: &Stmt, env: &Env) -> Result<()> {
     Ok(())
 }
 
-fn evaluate_expr(expr: &Expr, env: &Env) -> Result<Atom> {
+fn evaluate_expr(expr: &Expr, env: &Env) -> Result<Atom, RuntimeError> {
     match expr {
         Expr::Grouping(expr) => evaluate_expr(&expr, env),
         Expr::Binary(lhs, op, rhs) => {
@@ -144,7 +138,7 @@ fn evaluate_expr(expr: &Expr, env: &Env) -> Result<Atom> {
                     env.update(id.to_string(), Object::Atom(right));
                     return Ok(Atom::Boolean(true));
                 } else {
-                    anyhow::bail!(RuntimeError::UndefinedVar { id: id.to_string() })
+                    return Err(RuntimeError::UndefinedVar { id: id.to_string() });
                 }
             }
 
@@ -168,41 +162,47 @@ fn evaluate_expr(expr: &Expr, env: &Env) -> Result<Atom> {
             let callee = evaluate_expr(callee_expr, env)?;
             // validate that the callee is an identifier
             // TODO: possibly support some built-in functions on other Atom types
-            if let Atom::Identifier(id) = callee {
-                // get the function from the env, verify it is a function
-                if let Some(Object::Function(params, stmt)) = env.get(&id) {
-                    // create new env, pass args to it
-                    let func_scope = env.child();
-                    if let Some(args) = args {
-                        // check arity
-                        anyhow::ensure!(params.len() == args.len(), RuntimeError::InvalidNumberOfArgs {found: args.len(), req: params.len()});
-                        for (arg, id) in args.iter().zip(params) {
-                            let val = evaluate_expr(arg, env)?;
-                            func_scope.declare(id, Object::Atom(val))
-                        }
+            if let Atom::Function(id, params, stmt, closure) = callee {
+                // create new env, pass args to it
+                let func_scope = closure.child();
+                if let Some(args) = args {
+                    // check arity
+                    if params.len() != args.len() {
+                        return Err(RuntimeError::InvalidNumberOfArgs {
+                            found: args.len(),
+                            req: params.len(),
+                        });
                     }
-                    // evaluate function block
-                    let ret = evaluate_statement(&stmt,&func_scope);
-                    if let Err(e) = ret {
-                        // get return value
-                        if let Some(Return::Return(val)) = e.downcast_ref::<Return>() {
-                            Ok(val.clone())
-                        } else {
-                            anyhow::bail!(e)
+                    for (arg, id) in args.iter().zip(params) {
+                        let val = evaluate_expr(arg, env)?;
+                        func_scope.declare(id, Object::Atom(val))
+                    }
+                }
+
+                // evaluate function block
+                let ret = evaluate_statement(&stmt, &func_scope);
+                if let Err(e) = ret {
+                    // get return value
+                    if let RuntimeError::Return(val) = e {
+                        if let Atom::Function(ref id, ref params, ref stmt, ref closure) = val {
+                            env.declare(
+                                id.to_string(),
+                                Object::Function(params.clone(), *stmt.clone(), closure.clone()),
+                            );
                         }
+                        Ok(val)
                     } else {
-                        // void return
-                        Ok(Atom::Nil)
+                        Err(e)
                     }
                 } else {
-                    // func declaration not found
-                    anyhow::bail!(RuntimeError::FunctionDeclarationNotFound { found: id})
+                    // void return
+                    Ok(Atom::Nil)
                 }
             } else {
                 // invalid callee type
-                anyhow::bail!(RuntimeError::InvalidCalleeType {found: callee})
+                Err(RuntimeError::InvalidCalleeType { found: callee })
             }
-        },
+        }
         Expr::Literal(a) => {
             if let Atom::Identifier(ref id) = a {
                 if let Some(object) = env.get(&id) {
@@ -214,12 +214,15 @@ fn evaluate_expr(expr: &Expr, env: &Env) -> Result<Atom> {
                                 Ok(val.to_owned())
                             }
                         }
-                        Object::Function(params, stmt) => {
-                            Ok(Atom::Identifier(id.to_string()))
-                        },
+                        Object::Function(params, stmt, env) => Ok(Atom::Function(
+                            id.to_string(),
+                            params,
+                            Box::new(stmt),
+                            env.clone(),
+                        )),
                     }
                 } else {
-                    anyhow::bail!(RuntimeError::UndefinedVar { id: id.to_string() })
+                    Err(RuntimeError::UndefinedIdentifier { found: id.to_string() })
                 }
             } else {
                 Ok(a.to_owned())
@@ -228,7 +231,7 @@ fn evaluate_expr(expr: &Expr, env: &Env) -> Result<Atom> {
     }
 }
 
-fn evaluate_binary(op: &TokenType, lhs: Atom, rhs: Atom, env: &Env) -> Result<Atom> {
+fn evaluate_binary(op: &TokenType, lhs: Atom, rhs: Atom, env: &Env) -> Result<Atom, RuntimeError> {
     Ok(match op {
         // TokenType::Equal => match (lhs, rhs) {
         //     (Atom::Identifier(a), Atom::Identifier(b)) => {
@@ -261,117 +264,143 @@ fn evaluate_binary(op: &TokenType, lhs: Atom, rhs: Atom, env: &Env) -> Result<At
             (Atom::String(a), Atom::String(b)) => Atom::String(a + &b),
             (Atom::String(a), Atom::Number(b)) => Atom::String(a + &b.to_string()),
             (Atom::Number(a), Atom::String(b)) => Atom::String(a.to_string() + &b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: "+".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: "+".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::Minus => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Number(a - b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: "-".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: "-".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::Star => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Number(a * b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: "*".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: "*".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::Slash => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Number(a / b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: "/".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: "/".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::EqualEqual => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Boolean(a == b),
             (Atom::Boolean(a), Atom::Boolean(b)) => Atom::Boolean(a == b),
             (Atom::String(a), Atom::String(b)) => Atom::Boolean(a == b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: "==".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: "==".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::BangEqual => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Boolean(a != b),
             (Atom::Boolean(a), Atom::Boolean(b)) => Atom::Boolean(a != b),
             (Atom::String(a), Atom::String(b)) => Atom::Boolean(a != b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: "!=".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: "!=".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::Less => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Boolean(a < b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: "<".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: "<".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::LessEqual => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Boolean(a <= b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: "<=".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: "<=".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::Greater => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Boolean(a > b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: ">".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: ">".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::GreaterEqual => match (lhs, rhs) {
             (Atom::Number(a), Atom::Number(b)) => Atom::Boolean(a >= b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: ">=".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: ">=".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::And => match (lhs, rhs) {
             (Atom::Boolean(a), Atom::Boolean(b)) => Atom::Boolean(a && b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: "and".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: "and".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::Or => match (lhs, rhs) {
             (Atom::Boolean(a), Atom::Boolean(b)) => Atom::Boolean(a || b),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: "or".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: "or".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
         TokenType::Dot => match (lhs, rhs) {
             (Atom::Identifier(a), Atom::Identifier(b)) => todo!(),
-            (a, b) => anyhow::bail!(RuntimeError::InvalidOperand {
-                op: ".".to_string(),
-                lhs: a,
-                rhs: b
-            }),
+            (a, b) => {
+                return Err(RuntimeError::InvalidOperand {
+                    op: ".".to_string(),
+                    lhs: a,
+                    rhs: b,
+                })
+            }
         },
-        op => anyhow::bail!(RuntimeError::InvalidOperator { op: op.to_owned() }),
+        op => return Err(RuntimeError::InvalidOperator { op: op.to_owned() }),
     })
 }
 
-fn evaluate_unary(op: &TokenType, atom: Atom) -> Result<Atom> {
+fn evaluate_unary(op: &TokenType, atom: Atom) -> Result<Atom, RuntimeError> {
     Ok(match op {
         TokenType::Bang => match atom {
             Atom::Boolean(b) => Atom::Boolean(!b),
@@ -379,12 +408,13 @@ fn evaluate_unary(op: &TokenType, atom: Atom) -> Result<Atom> {
             Atom::Number(_) => Atom::Boolean(true),
             Atom::String(_) => Atom::Boolean(true),
             Atom::Identifier(_) => todo!(),
+            Atom::Function(_, _, _, _) => todo!(),
         },
         TokenType::Minus => match atom {
             Atom::Number(n) => Atom::Number(-n),
-            _ => anyhow::bail!(RuntimeError::UnaryOperationInvalid { op: '-' }),
+            _ => return Err(RuntimeError::UnaryOperationInvalid { op: '-' }),
         },
-        op => anyhow::bail!(RuntimeError::InvalidOperator { op: op.to_owned() }),
+        op => return Err(RuntimeError::InvalidOperator { op: op.to_owned() }),
     })
 }
 
@@ -392,6 +422,7 @@ fn evaluate_unary(op: &TokenType, atom: Atom) -> Result<Atom> {
 mod tests {
     use super::*;
     use crate::{lexer::*, parser::*};
+    use std::time::Instant;
 
     fn parser_setup(input: &str) -> Parser {
         let mut lexer = Lexer::new();
@@ -629,7 +660,53 @@ mod tests {
         "#;
         let mut parser = parser_setup(input);
         let program = parse(&mut parser).unwrap();
+        let start = Instant::now();
+        let result = interpret(program);
+        let end = Instant::now();
+        println!("Duration: {:?}", end.checked_duration_since(start).unwrap());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_closure() {
+        let input = r#"
+        fun makeCounter() {
+            var i = 0;
+            fun count() {
+                i = i + 1;
+                print i;
+            }
+            
+            return count;
+        }
+          
+        var counter = makeCounter();
+        counter(); // "1".
+        counter(); // "2".
+        "#;
+        let mut parser = parser_setup(input);
+        let program = parse(&mut parser).unwrap();
         let result = interpret(program);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_chapter11_1_bindings() {
+        let input = r#"
+        var a = "global";
+        {
+            fun showA() {
+                print a;
+            }
+
+            showA(); // global
+            var a = "block";
+            showA(); // global
+        }
+        "#;
+        let mut parser = parser_setup(input);
+        let program = parse(&mut parser).unwrap();
+        let result = interpret(program).unwrap();
+        // assert!(result.is_ok());
     }
 }
