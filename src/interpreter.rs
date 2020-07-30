@@ -114,23 +114,6 @@ impl Interpreter {
             Stmt::PrintStmt(expr) => {
                 let val = self.evaluate_expr(&expr, &env)?;
                 println!("{}", val);
-                // if let Expr::Literal(atom) = expr {
-                //     let value = if let Atom::Identifier(id, depth) = atom {
-                //         println!("depth {:?}", depth);
-                //         match
-                //         if let Some(var) = env.get_by_scope(id, depth) {
-                //             var.to_string()
-                //         } else {
-                //             return Err(RuntimeError::UndefinedVar { id: id.to_owned() });
-                //         }
-                //     } else {
-                //         atom.to_string()
-                //     };
-                //     println!("{}", value);
-                // } else {
-                //     let val = self.evaluate_expr(&expr, &env)?;
-                //     println!("{}", val);
-                // }
             }
             Stmt::Block(decls) => {
                 let block_scope = env.new_scope();
@@ -161,7 +144,7 @@ impl Interpreter {
                             }
                         }
                         Scope::Distance(depth) => {
-                            println!("assigning {} depth {}", id, depth);
+                            // println!("assigning {} depth {}", id, depth);
                             if env.get_by_distance(id, *depth).is_some() {
                                 let right = self.evaluate_expr(rhs, env)?;
                                 env.assign_at_distance(id.to_string(), Object::Atom(right), *depth);
@@ -190,7 +173,7 @@ impl Interpreter {
             }
             Expr::Call(callee_expr, args) => {
                 // evaluate callee expression
-                println!("getting callee");
+                // println!("getting callee");
                 let callee = self.evaluate_expr(callee_expr, env)?;
                 // validate that the callee is an identifier
                 // TODO: possibly support some built-in functions on other Atom types
@@ -212,12 +195,12 @@ impl Interpreter {
                     }
 
                     // evaluate function block
-                    println!("evaluating function block...");
+                    // println!("evaluating function block...");
                     let ret = self.evaluate_statement(&stmt, &func_scope);
                     if let Err(e) = ret {
                         // get return value
                         if let RuntimeError::Return(val) = e {
-                            println!("returning {}", val);
+                            // println!("returning {}", val);
                             if let Atom::Function(ref id, ref params, ref stmt, ref closure) = val {
                                 // env.assign(
                                 //     id.to_string(),
@@ -239,7 +222,7 @@ impl Interpreter {
             }
             Expr::Literal(a) => {
                 if let Atom::Identifier(ref id, depth) = a {
-                    println!("evaluating literal {} assumed distance {:?}", id, depth);
+                    // println!("evaluating literal {} assumed distance {:?}", id, depth);
                     let result_obj = match depth {
                         Scope::Global => self.global_env.get(id),
                         Scope::Distance(dist) => env.get_by_distance(id, *dist),
@@ -621,7 +604,7 @@ mod tests {
         let (mut parser, interpreter) = parser_setup(input);
         let mut program = parse(&mut parser).unwrap();
         Resolver::new().resolve(&mut program).unwrap();
-        println!("{:#?}", program);
+        // println!("{:#?}", program);
         let result = interpreter.interpret(program);
         assert!(result.is_err());
     }
@@ -685,7 +668,7 @@ mod tests {
     fn test_for_loop() {
         let input = r#"
         for(var i = 0; i < 3; i = i + 1){
-            // print i;
+            print i;
         }
 
         for(var i = 1; i < 3; i = i + 1)
@@ -734,10 +717,10 @@ mod tests {
         let mut program = parse(&mut parser).unwrap();
         Resolver::new().resolve(&mut program).unwrap();
         let start = Instant::now();
-        let result = interpreter.interpret(program).unwrap();
+        let result = interpreter.interpret(program);
         let end = Instant::now();
         println!("Duration: {:?}", end.checked_duration_since(start).unwrap());
-        // assert!(result.is_ok());
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -760,9 +743,9 @@ mod tests {
         let (mut parser, interpreter) = parser_setup(input);
         let mut program = parse(&mut parser).unwrap();
         Resolver::new().resolve(&mut program).unwrap();
-        println!("{:#?}", program);
-        let result = interpreter.interpret(program).unwrap();
-        // assert!(result.is_ok());
+        // println!("{:#?}", program);
+        let result = interpreter.interpret(program);
+        assert!(result.is_ok());
     }
 
     #[test]

@@ -51,15 +51,15 @@ impl Meatball {
 
     /// Locally insert new Object
     pub fn assign(&mut self, name: String, value: Object) {
-        println!("id {}, assigning {} {} ", self.id, name, value);
+        // println!("id {}, assigning {} {} ", self.id, name, value);
         self.local.insert(name, value);
     }
 
     pub fn assign_at_distance(&mut self, name: String, value: Object, distance: usize) {
-        println!(
-            "id {}, assigning {} to {} at distance {}",
-            self.id, name, value, distance
-        );
+        // println!(
+        //     "id {}, assigning {} to {} at distance {}",
+        //     self.id, name, value, distance
+        // );
         if distance == 0 {
             self.assign(name, value)
         } else {
@@ -73,13 +73,13 @@ impl Meatball {
 
     /// Searches local map or searches through ancestors
     pub fn get(&self, name: &str) -> Option<Object> {
-        println!("id {}, getting {} ", self.id, name);
+        // println!("id {}, getting {} ", self.id, name);
         self.local.get(name).cloned()
     }
 
     /// Searches local map or searches through ancestors
     pub fn get_by_distance(&self, name: &str, distance: usize) -> Option<Object> {
-        println!("id {}, getting {} at distance {}", self.id, name, distance);
+        // println!("id {}, getting {} at distance {}", self.id, name, distance);
         if distance == 0 {
             self.get(name)
         } else {
@@ -98,7 +98,7 @@ impl Parental for Spaghetti {
     }
     fn new_scope(&self) -> Spaghetti {
         let parent_id = self.borrow().get_id();
-        println!("creating new scope id {}", parent_id + 1);
+        // println!("creating new scope id {}", parent_id + 1);
         Rc::new(RefCell::new(Meatball {
             id: parent_id + 1,
             local: HashMap::new(),

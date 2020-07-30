@@ -151,7 +151,6 @@ impl Resolver {
     fn resolve_local(&mut self, identifier: &mut Atom) {
         if let Atom::Identifier(id, scope) = identifier {
             for (depth, s) in self.scopes.iter().rev().enumerate() {
-                println!("id {} depth {} scopes len {}", id, depth, self.scopes.len());
                 if s.contains_key(id) {
                     if let Some(false) = s.get(id) {
                         // return Err(ResolverError::UsingVarInOwnInitializer { id: id.to_string() })
