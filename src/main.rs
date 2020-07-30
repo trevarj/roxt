@@ -1,6 +1,6 @@
 #![feature(peekable_next_if)]
 use argh::FromArgs;
-use interpreter::interpret;
+use interpreter::Interpreter;
 use lexer::Lexer;
 use parser::Parser;
 use std::fs::File;
@@ -12,6 +12,7 @@ mod environment;
 mod interpreter;
 mod lexer;
 mod parser;
+mod resolver;
 mod tokens;
 #[derive(FromArgs, Debug)]
 /// Interpreter for the lox programming language. Built with Rust.
@@ -77,6 +78,7 @@ fn run(source: &str) -> Result<(), Box<dyn std::error::Error>> {
     lexer.scan_tokens(&mut source.chars().peekable())?;
     let tokens = lexer.get_tokens();
     let mut parser = Parser::new(tokens);
-    interpret(parser::parse(&mut parser)?)?;
+    let interpreter = Interpreter::new();
+    interpreter.interpret(parser::parse(&mut parser)?)?;
     Ok(())
 }

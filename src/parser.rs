@@ -1,4 +1,4 @@
-use super::ast::{Atom, Declaration, Expr, Program, Stmt};
+use super::ast::{Atom, Declaration, Expr, Program, Scope, Stmt};
 use super::tokens::{LiteralType, Token, TokenType};
 use anyhow::Result;
 use thiserror::Error;
@@ -335,8 +335,7 @@ fn expr_bp(p: &mut Parser, min_bp: u8) -> Result<Expr> {
                 if l_bp < min_bp {
                     break;
                 }
-                // p.next();
-                //
+
                 lhs = call(p, lhs)?;
                 continue;
             }
@@ -463,7 +462,9 @@ fn primary(p: &mut Parser) -> Result<Expr> {
             TokenType::Nil => Expr::Literal(Atom::Nil),
             TokenType::Literal(LiteralType::Number(n)) => Expr::Literal(Atom::Number(n)),
             TokenType::Literal(LiteralType::String(s)) => Expr::Literal(Atom::String(s)),
-            TokenType::Literal(LiteralType::Identifier(id)) => Expr::Literal(Atom::Identifier(id)),
+            TokenType::Literal(LiteralType::Identifier(id)) => {
+                Expr::Literal(Atom::Identifier(id, Scope::Global))
+            }
             TokenType::LeftParen => {
                 let expr = expr_bp(p, 0)?;
                 p.expect(TokenType::RightParen)?;

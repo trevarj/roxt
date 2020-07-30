@@ -1,11 +1,12 @@
 use super::ast::{Atom, Stmt};
 use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
 
-pub type Spaghetti = Rc<RefCell<Option<Meatball>>>;
+pub type Spaghetti = Rc<RefCell<Meatball>>;
 
 #[derive(Debug, PartialEq)]
 pub struct Meatball {
-    parent: Spaghetti,
+    id: usize,
+    parent: Option<Spaghetti>,
     local: HashMap<String, Object>,
 }
 
@@ -28,43 +29,62 @@ impl Display for Object {
 
 pub trait Parental {
     fn new_instance() -> Spaghetti;
-    fn child(&self) -> Spaghetti;
-    fn declare(&self, id: String, val: Object);
-    fn update(&self, id: String, val: Object);
+    fn new_scope(&self) -> Spaghetti;
+    fn assign(&self, id: String, val: Object);
+    fn assign_at_distance(&self, id: String, val: Object, distance: usize);
     fn get(&self, id: &str) -> Option<Object>;
+    fn get_by_distance(&self, id: &str, distance: usize) -> Option<Object>;
 }
 
 impl Meatball {
     pub fn new() -> Meatball {
         Meatball {
-            parent: Rc::new(RefCell::new(None)),
+            id: 0,
+            parent: None,
             local: HashMap::new(),
         }
     }
 
+    pub fn get_id(&self) -> usize {
+        self.id
+    }
+
     /// Locally insert new Object
-    pub fn insert(&mut self, name: String, value: Object) {
+    pub fn assign(&mut self, name: String, value: Object) {
+        println!("id {}, assigning {} {} ", self.id, name, value);
         self.local.insert(name, value);
     }
 
-    /// Updates locally, or cascades up to ancestors to update at the first one found
-    pub fn update_cascade(&mut self, name: String, value: Object) {
-        if let Some(obj) = self.local.get_mut(&name).as_deref_mut() {
-            *obj = value;
+    pub fn assign_at_distance(&mut self, name: String, value: Object, distance: usize) {
+        println!(
+            "id {}, assigning {} to {} at distance {}",
+            self.id, name, value, distance
+        );
+        if distance == 0 {
+            self.assign(name, value)
         } else {
-            if let Some(parent) = self.parent.borrow_mut().as_mut() {
-                parent.update_cascade(name, value);
+            if let Some(p) = self.parent.as_mut() {
+                p.borrow_mut().assign_at_distance(name, value, distance - 1)
+            } else {
+                // throw error
             }
         }
     }
 
     /// Searches local map or searches through ancestors
-    pub fn find(&self, name: &str) -> Option<Object> {
-        if let Some(obj) = self.local.get(name).cloned() {
-            Some(obj)
+    pub fn get(&self, name: &str) -> Option<Object> {
+        println!("id {}, getting {} ", self.id, name);
+        self.local.get(name).cloned()
+    }
+
+    /// Searches local map or searches through ancestors
+    pub fn get_by_distance(&self, name: &str, distance: usize) -> Option<Object> {
+        println!("id {}, getting {} at distance {}", self.id, name, distance);
+        if distance == 0 {
+            self.get(name)
         } else {
-            if let Some(parent) = self.parent.borrow().as_ref() {
-                parent.find(name)
+            if let Some(p) = self.parent.as_ref() {
+                p.get_by_distance(name, distance - 1)
             } else {
                 None
             }
@@ -74,52 +94,33 @@ impl Meatball {
 
 impl Parental for Spaghetti {
     fn new_instance() -> Spaghetti {
-        Spaghetti::new(RefCell::new(Some(Meatball::new())))
+        Spaghetti::new(RefCell::new(Meatball::new()))
     }
-    fn child(&self) -> Spaghetti {
-        Rc::new(RefCell::new(Some(Meatball {
+    fn new_scope(&self) -> Spaghetti {
+        let parent_id = self.borrow().get_id();
+        println!("creating new scope id {}", parent_id + 1);
+        Rc::new(RefCell::new(Meatball {
+            id: parent_id + 1,
             local: HashMap::new(),
-            parent: self.clone(),
-        })))
+            parent: Some(self.clone()),
+        }))
     }
-    fn declare(&self, id: String, val: Object) {
-        self.borrow_mut().as_mut().unwrap().insert(id, val)
+    fn assign(&self, id: String, val: Object) {
+        self.borrow_mut().assign(id, val)
     }
-    fn update(&self, id: String, val: Object) {
-        self.borrow_mut().as_mut().unwrap().update_cascade(id, val)
+    fn assign_at_distance(&self, id: String, val: Object, distance: usize) {
+        self.borrow_mut().assign_at_distance(id, val, distance)
     }
     fn get(&self, id: &str) -> Option<Object> {
-        if let Some(meat) = self.borrow().as_ref() {
-            meat.find(id)
-        } else {
-            None
-        }
+        self.borrow().get(id)
+    }
+    fn get_by_distance(&self, id: &str, distance: usize) -> Option<Object> {
+        self.borrow().get_by_distance(id, distance)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_creation_and_fetch_var_from_parent() {
-        let meatball = Spaghetti::new_instance();
-        meatball.declare("var1".to_string(), Object::Atom(Atom::Boolean(true)));
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
 
-        let childmeat = meatball.child();
-        let parent_val = childmeat.get("var1").unwrap();
-        assert_eq!(parent_val, Object::Atom(Atom::Boolean(true)));
-    }
-
-    #[test]
-    fn test_updating_globally() {
-        let meatball = Spaghetti::new_instance();
-        meatball.declare("var1".to_string(), Object::Atom(Atom::Boolean(true)));
-
-        let child = meatball.child();
-        child.update("var1".to_string(), Object::Atom(Atom::Boolean(false)));
-        assert_eq!(
-            meatball.get("var1").unwrap(),
-            Object::Atom(Atom::Boolean(false))
-        );
-    }
-}
+// }

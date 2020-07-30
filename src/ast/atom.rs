@@ -7,8 +7,14 @@ pub enum Atom {
     Number(f32),
     String(String),
     Boolean(bool),
-    Identifier(String),
+    Identifier(String, Scope),
     Function(String, Vec<String>, Box<Stmt>, Spaghetti),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Scope {
+    Global,
+    Distance(usize),
 }
 
 impl Display for Atom {
@@ -18,7 +24,7 @@ impl Display for Atom {
             Atom::Number(n) => write!(f, "{}", n),
             Atom::String(s) => write!(f, "{}", s),
             Atom::Boolean(b) => write!(f, "{}", b),
-            Atom::Identifier(id) => write!(f, "{}", id),
+            Atom::Identifier(id, _) => write!(f, "{}", id),
             Atom::Function(id, _, _, _) => write!(f, "<function: {}>", id),
         }
     }
