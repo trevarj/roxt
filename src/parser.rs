@@ -40,16 +40,19 @@ impl Parser {
         self.tokens.last().cloned()
     }
 
-    fn expect(&mut self, ttype: TokenType) -> Result<()> {
-        Ok(if let Some(token) = self.next() {
+    fn expect(&mut self, ttype: TokenType) -> Result<TokenType> {
+        if let Some(token) = self.next() {
             anyhow::ensure!(
                 token.token == ttype,
                 ParseError::UnexpectedToken {
                     token: token.token,
                     line: token.line
                 }
-            )
-        })
+            );
+            Ok(token.token)
+        } else {
+            anyhow::bail!(ParseError::UnexpectedEOF)
+        }
     }
 }
 

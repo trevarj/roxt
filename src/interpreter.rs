@@ -200,13 +200,6 @@ impl Interpreter {
                     if let Err(e) = ret {
                         // get return value
                         if let RuntimeError::Return(val) = e {
-                            // println!("returning {}", val);
-                            if let Atom::Function(ref id, ref params, ref stmt, ref closure) = val {
-                                // env.assign(
-                                //     id.to_string(),
-                                //     Object::Function(params.clone(), *stmt.clone(), closure.clone()),
-                                // );
-                            }
                             Ok(val)
                         } else {
                             Err(e)
@@ -765,7 +758,7 @@ mod tests {
         let (mut parser, interpreter) = parser_setup(input);
         let mut program = parse(&mut parser).unwrap();
         Resolver::new().resolve(&mut program).unwrap();
-        let result = interpreter.interpret(program).unwrap();
-        // assert!(result.is_ok());
+        let result = interpreter.interpret(program);
+        assert!(result.is_ok());
     }
 }

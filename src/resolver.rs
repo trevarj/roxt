@@ -136,9 +136,6 @@ impl Resolver {
             if let Expr::Binary(lhs, op, rhs) = expr {
                 self.resolve_expr(rhs);
                 if let Expr::Literal(atom) = lhs.as_mut() {
-                    if let Atom::Identifier(id, ..) = atom {
-                        // if not identifier throw error
-                    }
                     self.resolve_local(atom);
                 }
             }
@@ -185,49 +182,5 @@ mod tests {
         lexer.scan_tokens(&mut input.chars().peekable()).unwrap();
         let tokens = lexer.get_tokens();
         Parser::new(tokens)
-    }
-
-    #[test]
-    fn test_chapter11_1_bindings() {
-        let input = r#"
-        var b;
-        var a = "global";
-        {
-            fun showA() {
-               print a;
-            }
-
-            showA(); // global
-            var a = "block";
-            showA(); // global
-        }
-        "#;
-        let mut parser = parser_setup(input);
-        let mut program = parse(&mut parser).unwrap();
-        let mut resolver = Resolver::new();
-        resolver.resolve(&mut program).unwrap();
-        // let result = interpret(program).unwrap();
-        println!("{:#?}", program);
-        // assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_for_loop_bindings() {
-        let input = r#"
-        for(var i = 0; i < 3; i = i + 1){
-            print i;
-        }
-
-        // for(var i = 1; i < 3; i = i + 1)
-        //     print i;
-        "#;
-        let mut parser = parser_setup(input);
-        let mut program = parse(&mut parser).unwrap();
-        let mut resolver = Resolver::new();
-        resolver.resolve(&mut program).unwrap();
-        // let result = interpret(program);
-        // println!("{:?}", result);
-        println!("{:#?}", program);
-        // assert!(result.is_ok());
     }
 }
