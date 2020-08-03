@@ -1,3 +1,4 @@
+#![feature(refcell_take)]
 use argh::FromArgs;
 use std::fs::File;
 use std::io::{prelude::*, stdin, stdout, BufReader};
@@ -82,13 +83,13 @@ mod tests {
     fn test_vm() {
         let mut c = Chunk::new("test chunk".to_string());
         // a = -1.2
-        let idx = c.add_constant(1.2);
-        c.write(OpCode::OpConstant(idx as u8), 123);
+        let idx = c.add_constant(value::Value::Number(1.2));
+        c.write(OpCode::OpConstant(idx as u16), 123);
         c.write(OpCode::OpNegate, 123);
 
         // b = 2
-        let idx = c.add_constant(2.);
-        c.write(OpCode::OpConstant(idx as u8), 123);
+        let idx = c.add_constant(value::Value::Number(2.));
+        c.write(OpCode::OpConstant(idx as u16), 123);
 
         // a * b
         c.write(OpCode::OpMultiply, 123);

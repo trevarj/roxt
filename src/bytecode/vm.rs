@@ -12,6 +12,8 @@ pub enum InterpretError {
     InterpretCompileErr,
     #[error("Runtime error")]
     InterpretRuntimeErr,
+    #[error("Invalid Operand for negation on line {line:?}.")]
+    RuntimeErrorInvalidOperandNegation { line: usize },
 }
 
 impl VM {
@@ -26,34 +28,51 @@ impl VM {
     }
 
     pub fn interpret(&self, input: &str) -> Result<(), InterpretError> {
-        // Compile code!
         todo!()
     }
 
     pub fn run(&mut self, chunk: &Chunk) -> Result<(), InterpretError> {
-        Ok(for op in chunk.iter() {
+        Ok(for (op_idx, op) in chunk.iter().enumerate() {
             match op {
-                OpCode::OpConstantLong(_) => todo!(),
                 OpCode::OpConstant(const_idx) => {
                     let val = chunk.get_constant(*const_idx as usize);
                     self.stack.push(val);
                 }
+                OpCode::OpBool(b) => self.stack.push(Value::Bool(*b)),
+                OpCode::OpNil => self.stack.push(Value::Nil),
                 OpCode::OpAdd => self.binary_op('+')?,
                 OpCode::OpSubtract => self.binary_op('-')?,
                 OpCode::OpMultiply => self.binary_op('*')?,
                 OpCode::OpDivide => self.binary_op('/')?,
+
                 OpCode::OpNegate => {
-                    let val = self
+                    if let Value::Number(n) = self
                         .stack
                         .last_mut()
-                        .ok_or(InterpretError::InterpretRuntimeErr)?;
-                    *val = -*val;
+                        .ok_or(InterpretError::InterpretRuntimeErr)?
+                    {
+                        *n = -*n;
+                    } else {
+                        // operand needs to be number for negation
+                        return Err(InterpretError::RuntimeErrorInvalidOperandNegation {
+                            line: chunk.get_line_by_idx(op_idx),
+                        });
+                    }
                 }
                 OpCode::OpReturn => {
                     if let Some(val) = self.stack.pop() {
                         println!("{}", val);
                     }
                     break;
+                }
+                OpCode::OpNot => {
+                    if let Value::Bool(b) = self
+                        .stack
+                        .last_mut()
+                        .ok_or(InterpretError::InterpretRuntimeErr)?
+                    {
+                        *b = !*b;
+                    }
                 }
             };
         })
@@ -68,12 +87,19 @@ impl VM {
             .stack
             .pop()
             .ok_or(InterpretError::InterpretRuntimeErr)?;
-        Ok(match op {
-            '+' => self.stack.push(a + b),
-            '-' => self.stack.push(a - b),
-            '*' => self.stack.push(a * b),
-            '/' => self.stack.push(a / b),
-            _ => panic!("Unsupported operation"),
-        })
+        match (a, b) {
+            (Value::Number(a), Value::Number(b)) => {
+                let result = match op {
+                    '+' => a + b,
+                    '-' => a - b,
+                    '*' => a * b,
+                    '/' => a / b,
+                    _ => panic!("Unsupported operation"),
+                };
+                self.stack.push(Value::Number(result));
+            }
+            _ => todo!(),
+        }
+        Ok(())
     }
 }

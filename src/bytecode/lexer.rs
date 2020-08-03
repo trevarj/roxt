@@ -1,5 +1,5 @@
 use std::iter::Peekable;
-use std::str::CharIndices;
+use std::{fmt::Display, str::CharIndices};
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
@@ -14,7 +14,7 @@ pub enum LexError {
     UnexpectedEOF { line: usize, found: char },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TokenType {
     // Single-character tokens.
     LeftParen,
@@ -66,45 +66,100 @@ pub enum TokenType {
     EOF,
 }
 
-#[derive(Debug)]
-pub struct Token<'l> {
+impl Display for TokenType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TokenType::LeftParen => write!(f, "left parenthesis, '('"),
+            TokenType::RightParen => write!(f, "right parenthesis, ')'"),
+            TokenType::LeftBrace => write!(f, "left brace, '{{'"),
+            TokenType::RightBrace => write!(f, "left brace, '}}'"),
+            TokenType::Comma => write!(f, "comma, ','"),
+            TokenType::Dot => write!(f, "period, '.'"),
+            TokenType::Minus => write!(f, "minus, '-'"),
+            TokenType::Plus => write!(f, "plus, '+'"),
+            TokenType::Semicolon => write!(f, "semicolon, ';'"),
+            TokenType::Slash => write!(f, "slash, '/'"),
+            TokenType::Star => write!(f, "star, '*'"),
+            TokenType::Bang => write!(f, "bang, '!'"),
+            TokenType::BangEqual => write!(f, "bang equal, '!='"),
+            TokenType::Equal => write!(f, "equal, '='"),
+            TokenType::EqualEqual => write!(f, "equal equal, '=='"),
+            TokenType::Greater => write!(f, "great than, '>'"),
+            TokenType::GreaterEqual => write!(f, "greather than or equal to, '>='"),
+            TokenType::Less => write!(f, "less than, '<'"),
+            TokenType::LessEqual => write!(f, "less than, '<'"),
+            TokenType::Identifier => write!(f, "identifier"),
+            TokenType::String => write!(f, "string constant"),
+            TokenType::Number => write!(f, "number constant"),
+            TokenType::And => write!(f, "and"),
+            TokenType::Class => write!(f, "class"),
+            TokenType::Else => write!(f, "else"),
+            TokenType::False => write!(f, "false"),
+            TokenType::Fun => write!(f, "fun"),
+            TokenType::For => write!(f, "for"),
+            TokenType::If => write!(f, "if"),
+            TokenType::Nil => write!(f, "nil"),
+            TokenType::Or => write!(f, "or"),
+            TokenType::Print => write!(f, "print"),
+            TokenType::Return => write!(f, "return"),
+            TokenType::Super => write!(f, "super"),
+            TokenType::This => write!(f, "this"),
+            TokenType::True => write!(f, "true"),
+            TokenType::Var => write!(f, "var"),
+            TokenType::While => write!(f, "while"),
+            TokenType::EOF => write!(f, "end of file"),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Token<'input> {
     type_: TokenType,
-    lexeme: &'l str,
+    lexeme: &'input str,
     line: usize,
 }
 
-impl<'l> Token<'_> {
-    pub fn new(type_: TokenType, lexeme: &'l str, line: usize) -> Token<'l> {
+impl<'input> Token<'_> {
+    pub fn new(type_: TokenType, lexeme: &'input str, line: usize) -> Token {
         Token {
             type_,
             lexeme,
             line,
         }
     }
+
+    pub fn ttype(&self) -> TokenType {
+        self.type_
+    }
+
+    pub fn lexeme(&self) -> &str {
+        &self.lexeme
+    }
+
+    pub fn line(&self) -> usize {
+        self.line
+    }
 }
 
 pub struct Lexer<'input> {
-    input: &'input mut Peekable<CharIndices<'input>>,
+    input: Peekable<CharIndices<'input>>,
     input_str: &'input str,
     line: usize,
 }
 
 /// Scans through source code and produces tokens
-impl Lexer<'_> {
-    pub fn new<'input>(
-        input_str: &'input str,
-        input: &'input mut Peekable<CharIndices<'input>>,
-    ) -> Lexer<'input> {
+impl<'input> Lexer<'input> {
+    pub fn new(input_str: &'input str) -> Lexer<'input> {
         Lexer {
-            input,
+            input: input_str.char_indices().peekable(),
             input_str,
             line: 1,
         }
     }
 
-    pub fn scan_token(&mut self) -> Result<Token, LexError> {
+    pub fn scan_token(&mut self) -> Result<Token<'input>, LexError> {
         // skip white space
-        while let Some((idx, c)) = self.input.peek() {
+        while let Some((_, c)) = self.input.peek() {
             match c {
                 ' ' | '\r' | '\t' => {
                     self.input.next();
@@ -204,7 +259,7 @@ impl Lexer<'_> {
                 // Numbers
                 '0'..='9' => {
                     let mut length = 1;
-                    while let Some((idx, '0'..='9')) = self.input.peek() {
+                    while let Some((_, '0'..='9')) = self.input.peek() {
                         self.input.next();
                         length += 1;
                     }
@@ -236,7 +291,12 @@ impl Lexer<'_> {
                     self.make_ident_token(idx, length, self.line)
                 }
 
-                c => todo!(),
+                c => {
+                    return Err(LexError::UnexpectedToken {
+                        found: c,
+                        line: self.line,
+                    })
+                }
             }
         } else {
             Token::new(TokenType::EOF, "EOF", self.line)
@@ -249,14 +309,20 @@ impl Lexer<'_> {
         peeker.peek().copied()
     }
 
-    fn make_ident_token(&self, start_idx: usize, length: usize, line: usize) -> Token {
+    fn make_ident_token(&self, start_idx: usize, length: usize, line: usize) -> Token<'input> {
         let lexeme = &self.input_str[start_idx..start_idx + length];
         // check for keyword
         let type_ = reserved_to_tokentype(lexeme);
         Token::new(type_, lexeme, line)
     }
 
-    fn make_token(&self, type_: TokenType, start_idx: usize, length: usize, line: usize) -> Token {
+    fn make_token(
+        &self,
+        type_: TokenType,
+        start_idx: usize,
+        length: usize,
+        line: usize,
+    ) -> Token<'input> {
         let lexeme = &self.input_str[start_idx..start_idx + length];
         Token::new(type_, lexeme, line)
     }
@@ -292,8 +358,7 @@ mod tests {
     fn test_lexer() {
         let input_str = r#" "asdasd" 34.2  444 // asdasdasd fuck
         ((   !=)  class fuck "#;
-        let mut peekable = input_str.char_indices().peekable();
-        let mut lexer = Lexer::new(input_str, &mut peekable);
+        let mut lexer = Lexer::new(input_str);
 
         loop {
             let t = lexer.scan_token();

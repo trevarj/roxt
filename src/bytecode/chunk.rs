@@ -3,12 +3,14 @@ use std::fmt::Display;
 
 #[derive(Debug)]
 pub enum OpCode {
-    OpConstantLong(u32),
-    OpConstant(u8),
+    OpConstant(u16),
+    OpBool(bool),
+    OpNil,
     OpAdd,
     OpSubtract,
     OpMultiply,
     OpDivide,
+    OpNot,
     OpNegate,
     OpReturn,
 }
@@ -27,42 +29,40 @@ impl Display for Chunk {
         writeln!(f, "==== {} ====", self.name)?;
         for (op, line) in self.code.iter().zip(&self.lines) {
             match op {
-                OpCode::OpConstantLong(const_idx) => writeln!(
-                    f,
-                    "{:<4} {:<4} {:^10} {}",
-                    const_idx,
-                    line,
-                    "OP_CONSTANT_LONG",
-                    self.constants.get(*const_idx as usize).unwrap()
-                )?,
-
                 OpCode::OpConstant(const_idx) => {
                     // constant values known at compile time, safe to unwrap.
                     writeln!(
                         f,
-                        "{:<4} {:<4} {:^10} {}",
+                        "{:<4} {:<4} {:<10} val:{}",
                         const_idx,
                         line,
                         "OP_CONSTANT",
                         self.constants.get(*const_idx as usize).unwrap()
                     )?
                 }
-                OpCode::OpAdd => writeln!(f, "{:<4} {:<4} {:^10} {:^10}", "", line, "OP_ADD", "")?,
+                OpCode::OpBool(b) => {
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", b, line, "OP_BOOL", "")?
+                }
+                OpCode::OpNil => {
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "nil", line, "OP_NIL", "")?
+                }
+                OpCode::OpAdd => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_ADD", "")?,
                 OpCode::OpSubtract => {
-                    writeln!(f, "{:<4} {:<4} {:^10} {:^10}", "", line, "OP_SUBTRACT", "")?
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_SUBTRACT", "")?
                 }
                 OpCode::OpMultiply => {
-                    writeln!(f, "{:<4} {:<4} {:^10} {:^10}", "", line, "OP_MULTIPLY", "")?
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_MULTIPLY", "")?
                 }
                 OpCode::OpDivide => {
-                    writeln!(f, "{:<4} {:<4} {:^10} {:^10}", "", line, "OP_DIVIDE", "")?
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_DIVIDE", "")?
                 }
                 OpCode::OpNegate => {
-                    writeln!(f, "{:<4} {:<4} {:^10} {:^10}", "", line, "OP_NEGATE", "")?
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_NEGATE", "")?
                 }
                 OpCode::OpReturn => {
-                    writeln!(f, "{:<4} {:<4} {:^10} {:^10}", "", line, "OP_RETURN", "")?
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_RETURN", "")?
                 }
+                OpCode::OpNot => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_NOT", "")?,
             }
         }
         Ok(())
@@ -77,6 +77,10 @@ impl Chunk {
             constants: Vec::new(),
             lines: Vec::new(),
         }
+    }
+
+    pub fn get_line_by_idx(&self, index: usize) -> usize {
+        self.lines.get(index).copied().unwrap_or(0)
     }
 
     pub fn iter(&self) -> std::slice::Iter<OpCode> {
@@ -104,15 +108,20 @@ impl Chunk {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use std::mem::size_of;
     #[test]
     fn simple_opcode_print() {
         let mut c = Chunk::new("test chunk".to_string());
         c.write(OpCode::OpReturn, 123);
-        let idx = c.add_constant(1.2);
-        c.write(OpCode::OpConstant(idx as u8), 123);
-        let idx = c.add_constant(55.5);
-        c.write(OpCode::OpConstant(idx as u8), 123);
+        let idx = c.add_constant(Value::Number(1.2));
+        c.write(OpCode::OpConstant(idx as u16), 123);
+        let idx = c.add_constant(Value::Number(55.5));
+        c.write(OpCode::OpConstant(idx as u16), 123);
         println!("{}", c.to_string());
+    }
+
+    #[test]
+    fn test_size_of_ops() {
+        println!("{}", size_of::<OpCode>());
     }
 }
