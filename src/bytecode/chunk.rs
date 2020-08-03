@@ -1,7 +1,7 @@
 use super::value::Value;
 use std::fmt::Display;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum OpCode {
     OpConstant(u16),
     OpBool(bool),
@@ -12,6 +12,12 @@ pub enum OpCode {
     OpDivide,
     OpNot,
     OpNegate,
+    OpLess,
+    OpLessEqual,
+    OpGreater,
+    OpGreatEqual,
+    OpEqual,
+    OpNotEqual,
     OpReturn,
 }
 
@@ -58,6 +64,22 @@ impl Display for Chunk {
                 }
                 OpCode::OpNegate => {
                     writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_NEGATE", "")?
+                }
+                OpCode::OpLess => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_LT", "")?,
+                OpCode::OpLessEqual => {
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_LTEQ", "")?
+                }
+                OpCode::OpGreater => {
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_GT", "")?
+                }
+                OpCode::OpGreatEqual => {
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_GTEQ", "")?
+                }
+                OpCode::OpEqual => {
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_EQUAL", "")?
+                }
+                OpCode::OpNotEqual => {
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_NOTEQ", "")?
                 }
                 OpCode::OpReturn => {
                     writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_RETURN", "")?

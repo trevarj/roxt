@@ -87,7 +87,7 @@ impl Display for TokenType {
             TokenType::Greater => write!(f, "great than, '>'"),
             TokenType::GreaterEqual => write!(f, "greather than or equal to, '>='"),
             TokenType::Less => write!(f, "less than, '<'"),
-            TokenType::LessEqual => write!(f, "less than, '<'"),
+            TokenType::LessEqual => write!(f, "less than or equal to, '<='"),
             TokenType::Identifier => write!(f, "identifier"),
             TokenType::String => write!(f, "string constant"),
             TokenType::Number => write!(f, "number constant"),
@@ -202,6 +202,7 @@ impl<'input> Lexer<'input> {
                         line: self.line,
                         found: c,
                     })? {
+                        self.input.next();
                         self.make_token(TokenType::BangEqual, idx, 2, self.line)
                     } else {
                         self.make_token(TokenType::Bang, idx, 1, self.line)
@@ -212,6 +213,7 @@ impl<'input> Lexer<'input> {
                         line: self.line,
                         found: c,
                     })? {
+                        self.input.next();
                         self.make_token(TokenType::BangEqual, idx, 2, self.line)
                     } else {
                         self.make_token(TokenType::Equal, idx, 1, self.line)
@@ -222,6 +224,7 @@ impl<'input> Lexer<'input> {
                         line: self.line,
                         found: c,
                     })? {
+                        self.input.next();
                         self.make_token(TokenType::LessEqual, idx, 2, self.line)
                     } else {
                         self.make_token(TokenType::Less, idx, 1, self.line)
@@ -232,6 +235,7 @@ impl<'input> Lexer<'input> {
                         line: self.line,
                         found: c,
                     })? {
+                        self.input.next();
                         self.make_token(TokenType::GreaterEqual, idx, 2, self.line)
                     } else {
                         self.make_token(TokenType::Greater, idx, 1, self.line)
@@ -356,8 +360,9 @@ mod tests {
 
     #[test]
     fn test_lexer() {
-        let input_str = r#" "asdasd" 34.2  444 // asdasdasd fuck
+        let input_str = r#" "asdasd" 34.2 <= 444 // asdasdasd fuck
         ((   !=)  class fuck "#;
+        // let input_str = "5 <= 6";
         let mut lexer = Lexer::new(input_str);
 
         loop {

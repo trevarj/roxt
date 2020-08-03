@@ -111,9 +111,16 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
             let current_line = token.line();
             let operator = match token.ttype() {
                 TokenType::EOF => break,
-                TokenType::Plus | TokenType::Minus | TokenType::Star | TokenType::Slash => {
-                    token.ttype()
-                }
+                TokenType::Plus
+                | TokenType::Minus
+                | TokenType::Star
+                | TokenType::Slash
+                | TokenType::EqualEqual
+                | TokenType::BangEqual
+                | TokenType::Less
+                | TokenType::LessEqual
+                | TokenType::Greater
+                | TokenType::GreaterEqual => token.ttype(),
                 _ => {
                     eprintln!(
                         "{}",
@@ -153,8 +160,14 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
 
     fn infix_binding_power(&self, operator: &TokenType) -> Option<(u8, u8)> {
         match operator {
-            TokenType::Plus | TokenType::Minus => Some((1, 2)),
-            TokenType::Star | TokenType::Slash => Some((3, 4)),
+            TokenType::EqualEqual
+            | TokenType::BangEqual
+            | TokenType::Less
+            | TokenType::LessEqual
+            | TokenType::Greater
+            | TokenType::GreaterEqual => Some((2, 3)),
+            TokenType::Plus | TokenType::Minus => Some((4, 5)),
+            TokenType::Star | TokenType::Slash => Some((6, 7)),
             _ => None,
         }
     }
@@ -165,6 +178,11 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
             TokenType::Minus => self.emit_opcode(OpCode::OpSubtract, line),
             TokenType::Star => self.emit_opcode(OpCode::OpMultiply, line),
             TokenType::Slash => self.emit_opcode(OpCode::OpDivide, line),
+            TokenType::Less => self.emit_opcode(OpCode::OpLess, line),
+            TokenType::LessEqual => self.emit_opcode(OpCode::OpLessEqual, line),
+            TokenType::Greater => self.emit_opcode(OpCode::OpGreatEqual, line),
+            TokenType::EqualEqual => self.emit_opcode(OpCode::OpEqual, line),
+            TokenType::BangEqual => self.emit_opcode(OpCode::OpNotEqual, line),
             _ => todo!(),
         }
     }
@@ -250,14 +268,15 @@ mod tests {
 
     #[test]
     fn test_basic_expression() {
-        let source = "5 - (3*2)";
+        let source = "5 < 6 - 1";
         let mut chunk = test_chunk();
         let mut c = Compiler::new(&mut chunk, source);
         c.compile();
         c.expr(0).unwrap();
         chunk.write(OpCode::OpReturn, 123);
-        println!("{}", chunk);
+        println!("result: {}", chunk);
         let mut vm = VM::new();
         let result = vm.run(&chunk);
+        println!("{:?}", result);
     }
 }
