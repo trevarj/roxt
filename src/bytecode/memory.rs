@@ -2,13 +2,13 @@ use crate::object::Object;
 
 #[derive(Debug)]
 pub struct Memory {
-    heap: Vec<Object>
+    heap: Vec<Object>,
 }
 
 impl Memory {
     pub fn new() -> Memory {
         Memory {
-            heap: Vec::with_capacity(512)
+            heap: Vec::with_capacity(512),
         }
     }
 

@@ -1,6 +1,6 @@
-use super::value::Value;
-use std::fmt::Display;
+use crate::value::Value;
 use crate::{memory::Memory, object::Object};
+use std::fmt::Display;
 
 #[derive(Debug, Copy, Clone)]
 pub enum OpCode {
@@ -19,6 +19,11 @@ pub enum OpCode {
     OpGreatEqual,
     OpEqual,
     OpNotEqual,
+    OpPrint,
+    OpPop,
+    OpDefineGlobal(usize),
+    OpGetGlobal(usize),
+    OpSetGlobal(usize),
     OpReturn,
 }
 
@@ -86,6 +91,25 @@ impl Display for Chunk {
                     writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_RETURN", "")?
                 }
                 OpCode::OpNot => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_NOT", "")?,
+                OpCode::OpPrint => {
+                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_PRINT", "")?
+                }
+                OpCode::OpPop => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_POP", "")?,
+                OpCode::OpDefineGlobal(var_ident_ptr) => writeln!(
+                    f,
+                    "{:<4} {:<4} {:<10} {:^10}",
+                    var_ident_ptr, line, "OP_DEFINE_GLOBAL", ""
+                )?,
+                OpCode::OpGetGlobal(var_ident_ptr) => writeln!(
+                    f,
+                    "{:<4} {:<4} {:<10} {:^10}",
+                    var_ident_ptr, line, "OP_GET_GLOBAL", ""
+                )?,
+                OpCode::OpSetGlobal(var_ident_ptr) => writeln!(
+                    f,
+                    "{:<4} {:<4} {:<10} {:^10}",
+                    var_ident_ptr, line, "OP_SET_GLOBAL", ""
+                )?,
             }
         }
         Ok(())

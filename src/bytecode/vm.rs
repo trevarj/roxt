@@ -1,11 +1,13 @@
 use super::chunk::{Chunk, OpCode};
 use super::value::Value;
-use thiserror::Error;
 use crate::{memory::Memory, object::Object};
+use std::collections::HashMap;
+use thiserror::Error;
 
 pub struct VM<'mem> {
     stack: Vec<Value>,
     heap: &'mem mut Memory,
+    globals: HashMap<String, Value>,
 }
 
 #[derive(Error, Debug)]
@@ -25,13 +27,16 @@ pub enum InterpretError {
         op: OpCode,
         line: usize,
     },
+    #[error("Undefined variable {ident:?}.")]
+    RuntimeErrorUndefinedVariable { ident: String },
 }
 
 impl<'mem> VM<'_> {
     pub fn new(memory: &'mem mut Memory) -> VM {
         VM {
             stack: Vec::with_capacity(128),
-            heap: memory
+            heap: memory,
+            globals: HashMap::new(),
         }
     }
 
@@ -102,11 +107,56 @@ impl<'mem> VM<'_> {
                             Value::String(ptr) => {
                                 let str = self.heap.get_object_pointer(ptr);
                                 println!("{}", str)
-                            },
-                            _ => println!("{}", val)
+                            }
+                            _ => println!("{}", val),
                         }
                     }
-                    break;
+                    // break;
+                }
+                OpCode::OpPrint => {
+                    if let Some(val) = self.stack.pop() {
+                        match val {
+                            Value::String(ptr) => {
+                                let str = self.heap.get_object_pointer(ptr);
+                                println!("{}", str)
+                            }
+                            _ => println!("{}", val),
+                        }
+                    }
+                }
+                OpCode::OpPop => {
+                    self.stack.pop();
+                }
+                OpCode::OpDefineGlobal(var_ident_ptr) => {
+                    if let Object::String(ident) = self.heap.get_object_pointer(*var_ident_ptr) {
+                        if let Some(value) = self.stack.pop() {
+                            self.globals.insert(ident.to_string(), value);
+                        }
+                    }
+                }
+                OpCode::OpGetGlobal(var_ident_ptr) => {
+                    if let Object::String(ident) = self.heap.get_object_pointer(*var_ident_ptr) {
+                        if let Some(value) = self.globals.get(ident).copied() {
+                            self.stack.push(value);
+                        } else {
+                            return Err(InterpretError::RuntimeErrorUndefinedVariable {
+                                ident: ident.clone(),
+                            });
+                        }
+                    }
+                }
+                OpCode::OpSetGlobal(var_ident_ptr) => {
+                    if let Object::String(ident) = self.heap.get_object_pointer(*var_ident_ptr) {
+                        if let Some(new_val) = self.stack.last().copied() {
+                            if let Some(curr_val) = self.globals.get_mut(ident) {
+                                *curr_val = new_val;
+                            } else {
+                                return Err(InterpretError::RuntimeErrorUndefinedVariable {
+                                    ident: ident.clone(),
+                                });
+                            }
+                        }
+                    }
                 }
             };
         })
@@ -132,10 +182,10 @@ impl<'mem> VM<'_> {
                             let new_str = a.clone() + b;
                             let new_str_ptr = self.heap.add_object(Object::String(new_str));
                             Value::String(new_str_ptr)
-                        },
-                        _ => return Err(InterpretError::InterpretRuntimeErr)
+                        }
+                        _ => return Err(InterpretError::InterpretRuntimeErr),
                     }
-                },
+                }
                 _ => {
                     return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
                         lhs: a.to_string(),
@@ -227,12 +277,10 @@ impl<'mem> VM<'_> {
                     let str_a = self.heap.get_object_pointer(*a);
                     let str_b = self.heap.get_object_pointer(*b);
                     match (str_a, str_b) {
-                        (Object::String(a), Object::String(b)) => {
-                            Value::Bool(a == b)
-                        },
-                        _ => return Err(InterpretError::InterpretRuntimeErr)
+                        (Object::String(a), Object::String(b)) => Value::Bool(a == b),
+                        // _ => return Err(InterpretError::InterpretRuntimeErr),
                     }
-                },
+                }
                 _ => Value::Bool(a == b),
             },
             OpCode::OpNotEqual => match (a, b) {
@@ -240,12 +288,10 @@ impl<'mem> VM<'_> {
                     let str_a = self.heap.get_object_pointer(*a);
                     let str_b = self.heap.get_object_pointer(*b);
                     match (str_a, str_b) {
-                        (Object::String(a), Object::String(b)) => {
-                            Value::Bool(a != b)
-                        },
-                        _ => return Err(InterpretError::InterpretRuntimeErr)
+                        (Object::String(a), Object::String(b)) => Value::Bool(a != b),
+                        // _ => return Err(InterpretError::InterpretRuntimeErr),
                     }
-                },
+                }
                 _ => Value::Bool(a != b),
             },
             _ => {

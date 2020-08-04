@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn test_lexer() {
         let input_str = r#" "asdasd" 34.2 <= 444 // asdasdasd fuck
-        ((   !=) == class fuck "#;
+        ((   !=) == class fuck a = b"#;
         // let input_str = "5 <= 6";
         // let input_str = r#""hi" == "hi""#;
         let mut lexer = Lexer::new(input_str);

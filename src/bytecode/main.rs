@@ -1,18 +1,18 @@
 #![feature(refcell_take)]
 use argh::FromArgs;
+use memory::Memory;
 use std::fs::File;
 use std::io::{prelude::*, stdin, stdout, BufReader};
 use std::path::Path;
 use vm::{InterpretError, VM};
-use memory::Memory;
 
 pub mod chunk;
 pub mod compiler;
 pub mod debug;
 pub mod lexer;
-pub mod value;
-pub mod object;
 pub mod memory;
+pub mod object;
+pub mod value;
 pub mod vm;
 #[derive(FromArgs, Debug)]
 /// Interpreter for the lox programming language. Built with Rust.
