@@ -1,5 +1,6 @@
 use super::value::Value;
 use std::fmt::Display;
+use crate::{memory::Memory, object::Object};
 
 #[derive(Debug, Copy, Clone)]
 pub enum OpCode {
@@ -125,6 +126,17 @@ impl Chunk {
     pub fn get_constant(&self, const_idx: usize) -> Value {
         *self.constants.get(const_idx).unwrap()
     }
+
+    // /// Adds object heap memory
+    // /// Returns index
+    // pub fn add_object(&mut self, object: Object) -> usize {
+    //     self.heap.add_object(object)
+    // }
+
+    // /// Returns pointer to object on heap memory
+    // pub fn get_object(&self, obj_pointer: usize) -> &Object {
+    //     self.heap.get_object_pointer(obj_pointer)
+    // }
 }
 
 #[cfg(test)]

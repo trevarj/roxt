@@ -1,9 +1,8 @@
 use crate::{
     chunk::{Chunk, OpCode},
     lexer::{Lexer, Token, TokenType},
-    value::Value,
+    value::Value, object::Object, memory::Memory,
 };
-use std::{iter::Peekable, str::CharIndices};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -28,15 +27,17 @@ pub struct Compiler<'ch, 'input> {
     peeked: Option<Token<'input>>,
     panic_mode: bool,
     current_chunk: &'ch mut Chunk,
+    memory: &'input mut Memory,
 }
 
 impl<'ch, 'input> Compiler<'ch, 'input> {
-    pub fn new(chunk: &'ch mut Chunk, source: &'input str) -> Compiler<'ch, 'input> {
+    pub fn new(chunk: &'ch mut Chunk, source: &'input str, memory: &'input mut Memory) -> Compiler<'ch, 'input> {
         Compiler {
             lexer: Lexer::new(source),
             peeked: None,
             panic_mode: false,
             current_chunk: chunk,
+            memory
         }
     }
 
@@ -212,6 +213,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         let next = self.peek();
         match next.ttype() {
             TokenType::Number => self.number(),
+            TokenType::String => self.string(),
             TokenType::True | TokenType::False | TokenType::Nil => self.literal(),
             TokenType::LeftParen => self.grouping(),
             _ => Err(CompilerError::ParserUnexpectedValue {
@@ -255,27 +257,32 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
             _ => todo!(),
         })
     }
+
+    fn string(&mut self) -> Result<(), CompilerError> {
+        let string = self.next();
+        let string_lexeme = string.lexeme().to_string();
+        let line = string.line();
+        let string_ptr = self.memory.add_object(Object::String(string_lexeme.clone()));
+        self.emit_constant(Value::String(string_ptr), line)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vm::VM;
-
-    fn test_chunk() -> Chunk {
-        Chunk::new("test chunk".to_string())
-    }
+    use crate::{memory::Memory, vm::VM};
 
     #[test]
     fn test_basic_expression() {
-        let source = "5 < 6 - 1";
-        let mut chunk = test_chunk();
-        let mut c = Compiler::new(&mut chunk, source);
+        let mut mem = Memory::new();
+        let mut chunk = Chunk::new("test chunk".to_string());
+        let source = r#""hi" + "hi""#;
+        let mut c = Compiler::new(&mut chunk, source, &mut mem);
         c.compile();
         c.expr(0).unwrap();
         chunk.write(OpCode::OpReturn, 123);
         println!("result: {}", chunk);
-        let mut vm = VM::new();
+        let mut vm = VM::new(&mut mem);
         let result = vm.run(&chunk);
         println!("{:?}", result);
     }

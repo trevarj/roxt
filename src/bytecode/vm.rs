@@ -1,9 +1,11 @@
 use super::chunk::{Chunk, OpCode};
 use super::value::Value;
 use thiserror::Error;
+use crate::{memory::Memory, object::Object};
 
-pub struct VM {
+pub struct VM<'mem> {
     stack: Vec<Value>,
+    heap: &'mem mut Memory,
 }
 
 #[derive(Error, Debug)]
@@ -16,21 +18,20 @@ pub enum InterpretError {
     RuntimeErrorInvalidOperandNegation { line: usize },
     #[error("Invalid Operand for not operation on line {line:?}.")]
     RuntimeErrorInvalidOperandNot { line: usize },
-    #[error("Unsupported operation on numerics, {a:?} {op:?} {b:?}")]
-    RuntimeErrorUnsupportNumericBinaryOperation { a: f32, op: OpCode, b: f32 },
-    #[error("Unsupported operation on booleans, {a:?} {op:?} {b:?}")]
-    RuntimeErrorUnsupportBooleanBinaryOperation { a: bool, op: OpCode, b: bool },
-    #[error("Unsupported operation {line:?}, {child:?}.")]
+    #[error("Unsupported operation on booleans, {lhs:?} {op:?} {rhs:?}")]
     RuntimeErrorUnsupportBinaryOperation {
-        child: Box<InterpretError>,
+        lhs: String,
+        rhs: String,
+        op: OpCode,
         line: usize,
     },
 }
 
-impl VM {
-    pub fn new() -> VM {
+impl<'mem> VM<'_> {
+    pub fn new(memory: &'mem mut Memory) -> VM {
         VM {
-            stack: Vec::with_capacity(256),
+            stack: Vec::with_capacity(128),
+            heap: memory
         }
     }
 
@@ -63,14 +64,7 @@ impl VM {
                 | OpCode::OpGreater
                 | OpCode::OpGreatEqual
                 | OpCode::OpNotEqual
-                | OpCode::OpEqual => {
-                    if let Err(e) = self.binary_op(op) {
-                        Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
-                            child: Box::new(e),
-                            line: chunk.get_line_by_idx(op_idx),
-                        })?
-                    }
-                }
+                | OpCode::OpEqual => self.binary_op(op, chunk.get_line_by_idx(op_idx))?,
 
                 // UNARY OPERATIONS
                 OpCode::OpNegate => {
@@ -93,7 +87,6 @@ impl VM {
                         .last_mut()
                         .ok_or(InterpretError::InterpretRuntimeErr)?
                     {
-                        println!("hi");
                         *b = !*b;
                     } else {
                         // operand needs to be boolean for not
@@ -105,7 +98,13 @@ impl VM {
 
                 OpCode::OpReturn => {
                     if let Some(val) = self.stack.pop() {
-                        println!("{}", val);
+                        match val {
+                            Value::String(ptr) => {
+                                let str = self.heap.get_object_pointer(ptr);
+                                println!("{}", str)
+                            },
+                            _ => println!("{}", val)
+                        }
                     }
                     break;
                 }
@@ -113,51 +112,150 @@ impl VM {
         })
     }
 
-    fn binary_op(&mut self, op: &OpCode) -> Result<(), InterpretError> {
-        let b = self
+    fn binary_op(&mut self, op: &OpCode, line: usize) -> Result<(), InterpretError> {
+        let b = &self
             .stack
             .pop()
             .ok_or(InterpretError::InterpretRuntimeErr)?;
-        let a = self
+        let a = &self
             .stack
             .pop()
             .ok_or(InterpretError::InterpretRuntimeErr)?;
-        let result = match (a, b) {
-            (Value::Number(a), Value::Number(b)) => match op {
-                OpCode::OpAdd => Value::Number(a + b),
-                OpCode::OpSubtract => Value::Number(a - b),
-                OpCode::OpMultiply => Value::Number(a * b),
-                OpCode::OpDivide => Value::Number(a / b),
-                OpCode::OpLess => Value::Bool(a < b),
-                OpCode::OpLessEqual => Value::Bool(a <= b),
-                OpCode::OpGreater => Value::Bool(a > b),
-                OpCode::OpGreatEqual => Value::Bool(a >= b),
-                OpCode::OpEqual => Value::Bool(a == b),
-                OpCode::OpNotEqual => Value::Bool(a != b),
-                op => {
-                    return Err(
-                        InterpretError::RuntimeErrorUnsupportNumericBinaryOperation {
-                            a,
-                            b,
-                            op: op.clone(),
+        let result = match op {
+            OpCode::OpAdd => match (a, b) {
+                (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
+                (Value::String(a), Value::String(b)) => {
+                    let str_a = self.heap.get_object_pointer(*a);
+                    let str_b = self.heap.get_object_pointer(*b);
+                    match (str_a, str_b) {
+                        (Object::String(a), Object::String(b)) => {
+                            let new_str = a.clone() + b;
+                            let new_str_ptr = self.heap.add_object(Object::String(new_str));
+                            Value::String(new_str_ptr)
                         },
-                    )
+                        _ => return Err(InterpretError::InterpretRuntimeErr)
+                    }
+                },
+                _ => {
+                    return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
+                        lhs: a.to_string(),
+                        rhs: b.to_string(),
+                        op: *op,
+                        line,
+                    })
                 }
             },
-            (Value::Bool(a), Value::Bool(b)) => match op {
-                OpCode::OpEqual => Value::Bool(a == b),
-                OpCode::OpNotEqual => Value::Bool(a != b),
-                op => {
-                    return Err(
-                        InterpretError::RuntimeErrorUnsupportBooleanBinaryOperation {
-                            a,
-                            b,
-                            op: op.clone(),
-                        },
-                    )
+            OpCode::OpSubtract => match (a, b) {
+                (Value::Number(a), Value::Number(b)) => Value::Number(a - b),
+                _ => {
+                    return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
+                        lhs: a.to_string(),
+                        rhs: b.to_string(),
+                        op: *op,
+                        line,
+                    })
                 }
             },
-            _ => todo!(),
+            OpCode::OpMultiply => match (a, b) {
+                (Value::Number(a), Value::Number(b)) => Value::Number(a * b),
+                _ => {
+                    return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
+                        lhs: a.to_string(),
+                        rhs: b.to_string(),
+                        op: *op,
+                        line,
+                    })
+                }
+            },
+            OpCode::OpDivide => match (a, b) {
+                (Value::Number(a), Value::Number(b)) => Value::Number(a / b),
+                _ => {
+                    return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
+                        lhs: a.to_string(),
+                        rhs: b.to_string(),
+                        op: *op,
+                        line,
+                    })
+                }
+            },
+            OpCode::OpLess => match (a, b) {
+                (Value::Number(a), Value::Number(b)) => Value::Bool(a < b),
+                _ => {
+                    return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
+                        lhs: a.to_string(),
+                        rhs: b.to_string(),
+                        op: *op,
+                        line,
+                    })
+                }
+            },
+            OpCode::OpLessEqual => match (a, b) {
+                (Value::Number(a), Value::Number(b)) => Value::Bool(a <= b),
+                _ => {
+                    return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
+                        lhs: a.to_string(),
+                        rhs: b.to_string(),
+                        op: *op,
+                        line,
+                    })
+                }
+            },
+            OpCode::OpGreater => match (a, b) {
+                (Value::Number(a), Value::Number(b)) => Value::Bool(a > b),
+                _ => {
+                    return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
+                        lhs: a.to_string(),
+                        rhs: b.to_string(),
+                        op: *op,
+                        line,
+                    })
+                }
+            },
+            OpCode::OpGreatEqual => match (a, b) {
+                (Value::Number(a), Value::Number(b)) => Value::Bool(a >= b),
+                _ => {
+                    return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
+                        lhs: a.to_string(),
+                        rhs: b.to_string(),
+                        op: *op,
+                        line,
+                    })
+                }
+            },
+            OpCode::OpEqual => match (a, b) {
+                (Value::String(a), Value::String(b)) => {
+                    let str_a = self.heap.get_object_pointer(*a);
+                    let str_b = self.heap.get_object_pointer(*b);
+                    match (str_a, str_b) {
+                        (Object::String(a), Object::String(b)) => {
+                            Value::Bool(a == b)
+                        },
+                        _ => return Err(InterpretError::InterpretRuntimeErr)
+                    }
+                },
+                _ => Value::Bool(a == b),
+            },
+            OpCode::OpNotEqual => match (a, b) {
+                (Value::String(a), Value::String(b)) => {
+                    let str_a = self.heap.get_object_pointer(*a);
+                    let str_b = self.heap.get_object_pointer(*b);
+                    match (str_a, str_b) {
+                        (Object::String(a), Object::String(b)) => {
+                            Value::Bool(a != b)
+                        },
+                        _ => return Err(InterpretError::InterpretRuntimeErr)
+                    }
+                },
+                _ => Value::Bool(a != b),
+            },
+            _ => {
+                return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
+                    lhs: a.to_string(),
+                    rhs: b.to_string(),
+                    op: *op,
+                    line,
+                })
+            }
         };
         self.stack.push(result);
         Ok(())

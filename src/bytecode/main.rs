@@ -4,12 +4,15 @@ use std::fs::File;
 use std::io::{prelude::*, stdin, stdout, BufReader};
 use std::path::Path;
 use vm::{InterpretError, VM};
+use memory::Memory;
 
 pub mod chunk;
 pub mod compiler;
 pub mod debug;
 pub mod lexer;
 pub mod value;
+pub mod object;
+pub mod memory;
 pub mod vm;
 #[derive(FromArgs, Debug)]
 /// Interpreter for the lox programming language. Built with Rust.
@@ -23,8 +26,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Args = argh::from_env();
     println!("{:?}", args);
 
+    // get memory unit
+    let mut mem = Memory::new();
     // start VM
-    let vm = VM::new();
+    let vm = VM::new(&mut mem);
 
     // If a path was provided, we will process a file
     // otherwise, we will go to a prompt.
@@ -81,6 +86,7 @@ mod tests {
 
     #[test]
     fn test_vm() {
+        let mut mem = Memory::new();
         let mut c = Chunk::new("test chunk".to_string());
         // a = -1.2
         let idx = c.add_constant(value::Value::Number(1.2));
@@ -96,7 +102,7 @@ mod tests {
 
         c.write(OpCode::OpReturn, 123);
         println!("{}", c);
-        let mut vm = VM::new();
+        let mut vm = VM::new(&mut mem);
         let result = vm.run(&c);
     }
 }

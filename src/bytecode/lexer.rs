@@ -214,7 +214,7 @@ impl<'input> Lexer<'input> {
                         found: c,
                     })? {
                         self.input.next();
-                        self.make_token(TokenType::BangEqual, idx, 2, self.line)
+                        self.make_token(TokenType::EqualEqual, idx, 2, self.line)
                     } else {
                         self.make_token(TokenType::Equal, idx, 1, self.line)
                     }
@@ -243,20 +243,21 @@ impl<'input> Lexer<'input> {
                 }
                 '"' => {
                     let mut length = 0;
-                    while let Some((_, next_char)) = self.input.peek().copied() {
-                        if let '\n' = next_char {
-                            self.line += 1;
-                        }
-                        if let '"' = next_char {
-                            // eat the closing quote
+                    loop {
+                        if let Some((_, next_char)) = self.input.peek().copied() {
                             self.input.next();
-                            break;
+                            if let '"' = next_char {
+                                // terminated
+                                break;
+                            }
+                            // mult-line string
+                            if let '\n' = next_char {
+                                self.line += 1;
+                            }
+                            length += 1;
+                        } else {
+                            return Err(LexError::UnterminatedString);
                         }
-                        length += 1;
-                        self.input.next();
-                    }
-                    if self.input.peek().is_none() {
-                        return Err(LexError::UnterminatedString);
                     }
                     self.make_token(TokenType::String, idx + 1, length, self.line)
                 }
@@ -361,13 +362,14 @@ mod tests {
     #[test]
     fn test_lexer() {
         let input_str = r#" "asdasd" 34.2 <= 444 // asdasdasd fuck
-        ((   !=)  class fuck "#;
+        ((   !=) == class fuck "#;
         // let input_str = "5 <= 6";
+        // let input_str = r#""hi" == "hi""#;
         let mut lexer = Lexer::new(input_str);
 
         loop {
             let t = lexer.scan_token();
-            assert!(t.is_ok());
+            // assert!(t.is_ok());
             let t = t.unwrap();
             println!("{:?}", t);
             if let TokenType::EOF = t.type_ {
