@@ -1,4 +1,4 @@
-#![feature(refcell_take)]
+#![feature(drain_filter)]
 use argh::FromArgs;
 use memory::Memory;
 use std::fs::File;

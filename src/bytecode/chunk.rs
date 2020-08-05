@@ -24,6 +24,8 @@ pub enum OpCode {
     OpDefineGlobal(usize),
     OpGetGlobal(usize),
     OpSetGlobal(usize),
+    OpGetLocal(usize),
+    OpSetLocal(usize),
     OpReturn,
 }
 
@@ -45,7 +47,7 @@ impl Display for Chunk {
                     // constant values known at compile time, safe to unwrap.
                     writeln!(
                         f,
-                        "{:<4} {:<4} {:<10} val:{}",
+                        "{:<4} line:{:<4} {:<10} val:{}",
                         const_idx,
                         line,
                         "OP_CONSTANT",
@@ -53,62 +55,94 @@ impl Display for Chunk {
                     )?
                 }
                 OpCode::OpBool(b) => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", b, line, "OP_BOOL", "")?
+                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", b, line, "OP_BOOL", "")?
                 }
-                OpCode::OpNil => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "nil", line, "OP_NIL", "")?
-                }
+                OpCode::OpNil => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    "nil", line, "OP_NIL", ""
+                )?,
                 OpCode::OpAdd => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_ADD", "")?,
-                OpCode::OpSubtract => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_SUBTRACT", "")?
-                }
-                OpCode::OpMultiply => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_MULTIPLY", "")?
-                }
-                OpCode::OpDivide => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_DIVIDE", "")?
-                }
-                OpCode::OpNegate => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_NEGATE", "")?
-                }
+                OpCode::OpSubtract => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    "", line, "OP_SUBTRACT", ""
+                )?,
+                OpCode::OpMultiply => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    "", line, "OP_MULTIPLY", ""
+                )?,
+                OpCode::OpDivide => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    "", line, "OP_DIVIDE", ""
+                )?,
+                OpCode::OpNegate => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    "", line, "OP_NEGATE", ""
+                )?,
                 OpCode::OpLess => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_LT", "")?,
                 OpCode::OpLessEqual => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_LTEQ", "")?
+                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_LTEQ", "")?
                 }
                 OpCode::OpGreater => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_GT", "")?
+                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_GT", "")?
                 }
                 OpCode::OpGreatEqual => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_GTEQ", "")?
+                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_GTEQ", "")?
                 }
-                OpCode::OpEqual => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_EQUAL", "")?
+                OpCode::OpEqual => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    "", line, "OP_EQUAL", ""
+                )?,
+                OpCode::OpNotEqual => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    "", line, "OP_NOTEQ", ""
+                )?,
+                OpCode::OpReturn => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    "", line, "OP_RETURN", ""
+                )?,
+                OpCode::OpNot => {
+                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_NOT", "")?
                 }
-                OpCode::OpNotEqual => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_NOTEQ", "")?
+                OpCode::OpPrint => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    "", line, "OP_PRINT", ""
+                )?,
+                OpCode::OpPop => {
+                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_POP", "")?
                 }
-                OpCode::OpReturn => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_RETURN", "")?
-                }
-                OpCode::OpNot => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_NOT", "")?,
-                OpCode::OpPrint => {
-                    writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_PRINT", "")?
-                }
-                OpCode::OpPop => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_POP", "")?,
                 OpCode::OpDefineGlobal(var_ident_ptr) => writeln!(
                     f,
-                    "{:<4} {:<4} {:<10} {:^10}",
+                    "{:<4} line:{:<4} {:<10} {:^10}",
                     var_ident_ptr, line, "OP_DEFINE_GLOBAL", ""
                 )?,
                 OpCode::OpGetGlobal(var_ident_ptr) => writeln!(
                     f,
-                    "{:<4} {:<4} {:<10} {:^10}",
+                    "{:<4} line:{:<4} {:<10} {:^10}",
                     var_ident_ptr, line, "OP_GET_GLOBAL", ""
                 )?,
                 OpCode::OpSetGlobal(var_ident_ptr) => writeln!(
                     f,
-                    "{:<4} {:<4} {:<10} {:^10}",
+                    "{:<4} line:{:<4} {:<10} {:^10}",
                     var_ident_ptr, line, "OP_SET_GLOBAL", ""
+                )?,
+                OpCode::OpGetLocal(stack_ptr) => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    stack_ptr, line, "OP_GET_LOCAL", ""
+                )?,
+                OpCode::OpSetLocal(stack_ptr) => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    stack_ptr, line, "OP_SET_LOCAL", ""
                 )?,
             }
         }

@@ -7,8 +7,10 @@ use crate::{
 };
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum CompilerError {
+    #[error("Compilation has failed with errors.")]
+    CompilationFailedWithErrors,
     #[error("Max constants in chunk.")]
     ChunkMaxConstants,
     #[error("Expected {expect:?}, found {found:?} on line {line:?}.")]
@@ -23,13 +25,27 @@ pub enum CompilerError {
     ParserUnexpectedOperator { found: String, line: usize },
     #[error("Unable to parse number, found {found:?} on line {line:?}.")]
     ParserFloatParseError { found: String, line: usize },
+    #[error("Local variable {found:?} already defined in current scope on line {line:?}.")]
+    ParserLocalVariableAlreadyDefined { found: String, line: usize },
+    #[error("Cannot use variable {found:?} inside its initilizer on line {line:?}.")]
+    ParserVariableInsideOwnInitializer { found: String, line: usize },
 }
 pub struct Compiler<'ch, 'input> {
+    /// The Lexer used to tokenize the source
     lexer: Lexer<'input>,
+    /// Peeked value that is next up in the lexer
     peeked: Option<Token<'input>>,
-    panic_mode: bool,
+    /// Current chunk that is being compiled
     current_chunk: &'ch mut Chunk,
+    /// Heap memory
     memory: &'input mut Memory,
+    /// Local variable scopes, vec of variable lexemes and their depths.
+    /// Is None when variable is declared but not defined (initialized)
+    locals: Vec<(String, Option<usize>)>,
+    /// Current scope depth
+    scope_depth: usize,
+    /// Vec of errors that occured during compilation
+    errors: Vec<CompilerError>,
 }
 
 impl<'ch, 'input> Compiler<'ch, 'input> {
@@ -41,9 +57,11 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         Compiler {
             lexer: Lexer::new(source),
             peeked: None,
-            panic_mode: false,
             current_chunk: chunk,
             memory,
+            locals: Vec::new(),
+            scope_depth: 0,
+            errors: Vec::new(),
         }
     }
 
@@ -66,47 +84,55 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         self.emit_opcode(OpCode::OpReturn, line)
     }
 
+    fn emit_ident_const(&mut self, ident: &String, line: usize) -> Result<usize, CompilerError> {
+        // put ident in memory
+        let ident_ptr = self.memory.add_object(Object::String(ident.clone()));
+        // create constant with ident ptr
+        // self.emit_constant(Value::String(ident_ptr), line)?;
+        self.current_chunk.add_constant(Value::String(ident_ptr));
+        Ok(ident_ptr)
+    }
+
     /// Advances the lexer by one token
     /// If the lexer runs into an error it continues
     /// until a "good" token is found
-    fn advance(&mut self) -> Token<'input> {
-        match self.lexer.scan_token() {
+    fn advance(&mut self) -> Result<Token<'input>, CompilerError> {
+        Ok(match self.lexer.scan_token() {
             Ok(token) => token,
             Err(err) => {
                 eprintln!("{}", err);
-                self.panic_mode = true;
                 loop {
                     match self.lexer.scan_token() {
-                        Ok(token) => return token,
+                        Ok(token) => return Ok(token),
                         Err(err) => eprintln!("{}", err),
                     }
                 }
             }
-        }
+        })
     }
 
     /// Gets next token from lexer
-    fn next(&mut self) -> Token {
-        match self.peeked.take() {
+    fn next(&mut self) -> Result<Token, CompilerError> {
+        Ok(match self.peeked.take() {
             Some(token) => token,
-            None => self.advance(),
-        }
+            None => self.advance()?,
+        })
     }
 
     /// Peeks at next token in lexer
-    fn peek(&mut self) -> &Token<'input> {
-        if self.peeked.is_none() {
-            self.peeked = Some(self.advance());
+    fn peek(&mut self) -> Result<&Token<'input>, CompilerError> {
+        Ok(if self.peeked.is_none() {
+            self.peeked = Some(self.advance()?);
             self.peeked.as_ref().unwrap()
         } else {
             self.peeked.as_ref().unwrap()
-        }
+        })
     }
 
     /// Expects to find given TokenType
     /// Returns that token or errors
     fn expect(&mut self, type_: TokenType) -> Result<Token, CompilerError> {
-        let next = self.next();
+        let next = self.next()?;
         if type_ != next.ttype() {
             return Err(CompilerError::ParserExpectedTokenError {
                 found: next.lexeme().to_string(),
@@ -117,26 +143,46 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         Ok(next)
     }
 
-    pub fn compile(&mut self) -> Option<Vec<CompilerError>> {
-        let mut errors: Vec<CompilerError> = Vec::new();
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
 
-        while self.peek().ttype() != TokenType::EOF {
-            self.decl(&mut errors);
+    fn end_scope(&mut self) {
+        self.scope_depth -= 1;
+        // clean out the locals from ending scope
+        while let Some((_, Some(depth))) = self.locals.last() {
+            if depth <= &self.scope_depth {
+                break;
+            }
+            self.locals.pop();
+            self.emit_opcode(OpCode::OpPop, 0);
+        }
+    }
+
+    /// Compiles source code
+    /// True if compilation was successful, false if errors occurred.
+    pub fn compile(&mut self) -> Result<(), CompilerError> {
+        while self.peek()?.ttype() != TokenType::EOF {
+            self.decl();
         }
 
-        if errors.is_empty() {
-            None
+        if self.errors.is_empty() {
+            Ok(())
         } else {
-            Some(errors)
+            // Log any errors
+            for e in self.errors.iter() {
+                eprintln!("{}", e)
+            }
+            Err(CompilerError::CompilationFailedWithErrors)
         }
     }
 
     /// Synchronize compilation to the next statement
     /// in order to continue parsing
-    fn synchronize(&mut self) {
+    fn synchronize(&mut self) -> Result<(), CompilerError> {
         // synchronize to next statement
-        while self.peek().ttype() != TokenType::EOF {
-            match self.peek().ttype() {
+        Ok(while self.peek()?.ttype() != TokenType::EOF {
+            match self.peek()?.ttype() {
                 TokenType::Class
                 | TokenType::Fun
                 | TokenType::Var
@@ -149,20 +195,20 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
                     self.next();
                 }
             }
-        }
+        })
     }
 
     /// A declaration
     /// If the inner statement fails, synchronize
-    fn decl(&mut self, errors: &mut Vec<CompilerError>) {
-        let result = match self.peek().ttype() {
+    fn decl(&mut self) -> Result<(), CompilerError> {
+        let result = match self.peek()?.ttype() {
             TokenType::Var => self.var_decl(),
             _ => self.stmt(),
         };
-        if let Err(err) = result {
-            errors.push(err);
+        Ok(if let Err(err) = result {
+            self.errors.push(err);
             self.synchronize();
-        }
+        })
     }
 
     /// A variable declaration statement
@@ -172,14 +218,30 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         // get the variable ident
         let var_ident = self.expect(TokenType::Identifier)?.lexeme().to_string();
 
-        let peeked = self.peek();
+        let peeked = self.peek()?;
         let ttype = peeked.ttype();
         let line = peeked.line();
 
-        // put var ident in memory
-        let var_ident_ptr = self.memory.add_object(Object::String(var_ident));
-        // create constant with var ident ptr
-        self.emit_constant(Value::String(var_ident_ptr), line)?;
+        // if local, do not emit constant. store in compiler locals
+        let var_ident_ptr = if self.scope_depth == 0 {
+            // global
+            self.emit_ident_const(&var_ident, line)?
+        } else {
+            // check if variable is already defined locally
+            for (ident, depth) in self.locals.iter().rev() {
+                if depth.unwrap() < self.scope_depth {
+                    break;
+                }
+                if *ident == var_ident {
+                    return Err(CompilerError::ParserLocalVariableAlreadyDefined {
+                        found: var_ident,
+                        line,
+                    });
+                }
+            }
+            self.locals.push((var_ident, None));
+            self.locals.len() - 1
+        };
 
         match ttype {
             TokenType::Equal => {
@@ -191,14 +253,28 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
             _ => self.emit_opcode(OpCode::OpNil, line),
         }
         self.expect(TokenType::Semicolon)?;
-        self.emit_opcode(OpCode::OpDefineGlobal(var_ident_ptr), line);
+        // if local don't emit OpDefineGlobal
+        if self.scope_depth == 0 {
+            self.emit_opcode(OpCode::OpDefineGlobal(var_ident_ptr), line);
+        } else {
+            // set scope to know that variable was initialized
+            self.locals.last_mut().unwrap().1 = Some(self.scope_depth);
+        }
         Ok(())
     }
 
     /// A statement
     fn stmt(&mut self) -> Result<(), CompilerError> {
-        match self.peek().ttype() {
+        match self.peek()?.ttype() {
             TokenType::Print => self.print_statement(),
+            TokenType::LeftBrace => {
+                self.expect(TokenType::LeftBrace)?;
+                self.begin_scope();
+                self.block_stmt()?;
+                self.end_scope();
+                self.expect(TokenType::RightBrace)?;
+                Ok(())
+            }
             _ => self.expr_stmt(),
         }
     }
@@ -220,6 +296,16 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         Ok(())
     }
 
+    fn block_stmt(&mut self) -> Result<(), CompilerError> {
+        Ok(
+            while self.peek()?.ttype() != TokenType::RightBrace
+                && self.peek()?.ttype() != TokenType::EOF
+            {
+                self.decl();
+            },
+        )
+    }
+
     /// An expression that calls expression with binding power
     fn expr(&mut self) -> Result<(), CompilerError> {
         self.expr_bp(0)
@@ -230,7 +316,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         self.unary()?;
 
         loop {
-            let token = self.peek();
+            let token = self.peek()?;
             let current_line = token.line();
             let operator = match token.ttype() {
                 TokenType::EOF => break,
@@ -277,7 +363,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
 
     /// Binding powers of prefix tokens
     fn prefix_binding_power(&mut self) -> Option<((), u8)> {
-        match self.peek().ttype() {
+        match self.peek().ok()?.ttype() {
             TokenType::Minus | TokenType::Bang => Some(((), 5)),
             _ => None,
         }
@@ -320,11 +406,11 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         // check for unary operators
         Ok(if let Some(((), r_bp)) = self.prefix_binding_power() {
             // store operator
-            let operator = self.peek().ttype();
+            let operator = self.peek()?.ttype();
             // store line
-            let line = self.peek().line();
+            let line = self.peek()?.line();
             // consume unary operator
-            self.next();
+            self.next()?;
             // evaluate unary operand
             self.expr_bp(r_bp)?;
             match operator {
@@ -340,7 +426,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     /// A primary token
     /// or a left parenthesis to trigger a grouping expression
     fn primary(&mut self) -> Result<(), CompilerError> {
-        let next = self.peek();
+        let next = self.peek()?;
         match next.ttype() {
             TokenType::Number => self.number(),
             TokenType::String => self.string(),
@@ -366,7 +452,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     }
 
     fn number(&mut self) -> Result<(), CompilerError> {
-        let token = self.next();
+        let token = self.next()?;
         Ok(if let Ok(f) = token.lexeme().parse::<f32>() {
             let val = Value::Number(f);
             let line = token.line();
@@ -380,7 +466,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     }
 
     fn literal(&mut self) -> Result<(), CompilerError> {
-        let token = self.next();
+        let token = self.next()?;
         let line = token.line();
         Ok(match token.ttype() {
             TokenType::True => self.emit_opcode(OpCode::OpBool(true), line),
@@ -391,7 +477,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     }
 
     fn string(&mut self) -> Result<(), CompilerError> {
-        let string = self.next();
+        let string = self.next()?;
         let string_lexeme = string.lexeme().to_string();
         let line = string.line();
         let string_ptr = self
@@ -405,21 +491,42 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     }
 
     fn named_variable(&mut self) -> Result<(), CompilerError> {
-        let token = self.next();
+        let token = self.next()?;
         let var_ident = token.lexeme().to_string();
         let line = token.line();
-        // put var ident in memory
-        let var_ident_ptr = self.memory.add_object(Object::String(var_ident));
-        // create constant with var ident ptr
-        self.emit_constant(Value::String(var_ident_ptr), line)?;
-        if self.peek().ttype() == TokenType::Equal {
+
+        let (get_op, set_op) = if let Some(index) = self.resolve_local(&var_ident)? {
+            (OpCode::OpGetLocal(index), OpCode::OpSetLocal(index))
+        } else {
+            // emit global variable identifier string, so it can be found during runtime
+            let index = self.emit_ident_const(&var_ident, line)?;
+            (OpCode::OpGetGlobal(index), OpCode::OpSetGlobal(index))
+        };
+
+        if self.peek()?.ttype() == TokenType::Equal {
             self.expect(TokenType::Equal)?;
             self.expr()?;
-            self.emit_opcode(OpCode::OpSetGlobal(var_ident_ptr), line);
+            self.emit_opcode(set_op, line);
         } else {
-            self.emit_opcode(OpCode::OpGetGlobal(var_ident_ptr), line);
+            self.emit_opcode(get_op, line);
         }
         Ok(())
+    }
+
+    /// Resolves local variable index. Returns None if not found
+    fn resolve_local(&mut self, ident: &String) -> Result<Option<usize>, CompilerError> {
+        for (idx, (l_ident, depth)) in self.locals.iter().enumerate().rev() {
+            if depth.is_none() {
+                return Err(CompilerError::ParserVariableInsideOwnInitializer {
+                    found: l_ident.clone(),
+                    line: self.peek()?.line(),
+                });
+            }
+            if l_ident == ident {
+                return Ok(Some(idx));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -450,11 +557,7 @@ mod tests {
         let source = r#"print "hi";"#;
         let mut c = Compiler::new(&mut chunk, source, &mut mem);
         // compile to bytecode
-        if let Some(errors) = c.compile() {
-            for e in errors {
-                println!("{}", e);
-            }
-        }
+        c.compile();
         // debug chunk
         println!("result: {}", chunk);
         // start up VM
@@ -474,11 +577,38 @@ mod tests {
 
         let mut c = Compiler::new(&mut chunk, source, &mut mem);
         // compile to bytecode
-        if let Some(errors) = c.compile() {
-            for e in errors {
-                println!("{}", e);
+        c.compile();
+        // debug chunk
+        println!("result: {}", chunk);
+        // start up VM
+        let mut vm = VM::new(&mut mem);
+        // run bytecode in chunk
+        let result = vm.run(&chunk);
+        println!("{:?}", result);
+        println!("{:?}", mem);
+    }
+
+    #[test]
+    fn test_local_vars() {
+        let mut mem = Memory::new();
+        let mut chunk = Chunk::new("test chunk".to_string());
+
+        let source = r#"
+        var a = 1; 
+        {
+            var a = 3;
+            print a;
+            {
+                var a = 4;
+                print a;
             }
         }
+        print a;
+        "#;
+
+        let mut c = Compiler::new(&mut chunk, source, &mut mem);
+        // compile to bytecode
+        c.compile().unwrap();
         // debug chunk
         println!("result: {}", chunk);
         // start up VM

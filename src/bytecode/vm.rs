@@ -158,6 +158,20 @@ impl<'mem> VM<'_> {
                         }
                     }
                 }
+                OpCode::OpGetLocal(slot) => {
+                    // get the variable at slot
+                    let value = self.stack.get(*slot).copied().unwrap();
+                    // push value at top of stack
+                    self.stack.push(value);
+                }
+                OpCode::OpSetLocal(slot) => {
+                    // peek at the top of stack
+                    let peeked = self.stack.last().copied().unwrap();
+                    // get value at slot
+                    let value = self.stack.get_mut(*slot).unwrap();
+                    // update value at slot
+                    *value = peeked;
+                }
             };
         })
     }
