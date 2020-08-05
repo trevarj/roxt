@@ -20,3 +20,15 @@ impl Display for Value {
         }
     }
 }
+
+impl PartialEq<bool> for Value {
+    fn eq(&self, other: &bool) -> bool {
+        match self {
+            Value::Nil => false == *other,
+            Value::Bool(b) => b == other,
+            Value::Number(n) => (*n > 0.) == *other,
+            Value::String(_) => true == *other,
+            Value::Object(_) => true == *other,
+        }
+    }
+}

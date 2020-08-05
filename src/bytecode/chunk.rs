@@ -1,5 +1,4 @@
 use crate::value::Value;
-use crate::{memory::Memory, object::Object};
 use std::fmt::Display;
 
 #[derive(Debug, Copy, Clone)]
@@ -26,6 +25,7 @@ pub enum OpCode {
     OpSetGlobal(usize),
     OpGetLocal(usize),
     OpSetLocal(usize),
+    OpJumpIfFalse(usize),
     OpReturn,
 }
 
@@ -144,6 +144,11 @@ impl Display for Chunk {
                     "{:<4} line:{:<4} {:<10} {:^10}",
                     stack_ptr, line, "OP_SET_LOCAL", ""
                 )?,
+                OpCode::OpJumpIfFalse(offset) => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    offset, line, "OP_JMP_IF_FALSE", ""
+                )?,
             }
         }
         Ok(())
@@ -168,6 +173,16 @@ impl Chunk {
         self.code.iter()
     }
 
+    pub fn code(&self) -> &Vec<OpCode> {
+        &self.code
+    }
+
+    pub fn set_code(&mut self, offset: usize, new: OpCode) {
+        if let Some(old) = self.code.get_mut(offset) {
+            *old = new;
+        }
+    }
+
     /// Writes OpCode to Chunk
     pub fn write(&mut self, op: OpCode, line: usize) {
         self.code.push(op);
@@ -184,17 +199,6 @@ impl Chunk {
     pub fn get_constant(&self, const_idx: usize) -> Value {
         *self.constants.get(const_idx).unwrap()
     }
-
-    // /// Adds object heap memory
-    // /// Returns index
-    // pub fn add_object(&mut self, object: Object) -> usize {
-    //     self.heap.add_object(object)
-    // }
-
-    // /// Returns pointer to object on heap memory
-    // pub fn get_object(&self, obj_pointer: usize) -> &Object {
-    //     self.heap.get_object_pointer(obj_pointer)
-    // }
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 pub struct VM<'mem> {
+    pc: usize,
     stack: Vec<Value>,
     heap: &'mem mut Memory,
     globals: HashMap<String, Value>,
@@ -34,6 +35,7 @@ pub enum InterpretError {
 impl<'mem> VM<'_> {
     pub fn new(memory: &'mem mut Memory) -> VM {
         VM {
+            pc: 0,
             stack: Vec::with_capacity(128),
             heap: memory,
             globals: HashMap::new(),
@@ -49,14 +51,16 @@ impl<'mem> VM<'_> {
     }
 
     pub fn run(&mut self, chunk: &Chunk) -> Result<(), InterpretError> {
-        Ok(for (op_idx, op) in chunk.iter().enumerate() {
+        let code = chunk.code();
+        loop {
+            let op = code[self.pc];
             match op {
                 // PRIMITIVES
                 OpCode::OpConstant(const_idx) => {
-                    let val = chunk.get_constant(*const_idx as usize);
+                    let val = chunk.get_constant(const_idx as usize);
                     self.stack.push(val);
                 }
-                OpCode::OpBool(b) => self.stack.push(Value::Bool(*b)),
+                OpCode::OpBool(b) => self.stack.push(Value::Bool(b)),
                 OpCode::OpNil => self.stack.push(Value::Nil),
 
                 // BINARY OPERATIONS
@@ -69,7 +73,7 @@ impl<'mem> VM<'_> {
                 | OpCode::OpGreater
                 | OpCode::OpGreatEqual
                 | OpCode::OpNotEqual
-                | OpCode::OpEqual => self.binary_op(op, chunk.get_line_by_idx(op_idx))?,
+                | OpCode::OpEqual => self.binary_op(&op, chunk.get_line_by_idx(self.pc))?,
 
                 // UNARY OPERATIONS
                 OpCode::OpNegate => {
@@ -82,7 +86,7 @@ impl<'mem> VM<'_> {
                     } else {
                         // operand needs to be number for negation
                         return Err(InterpretError::RuntimeErrorInvalidOperandNegation {
-                            line: chunk.get_line_by_idx(op_idx),
+                            line: chunk.get_line_by_idx(self.pc),
                         });
                     }
                 }
@@ -96,23 +100,12 @@ impl<'mem> VM<'_> {
                     } else {
                         // operand needs to be boolean for not
                         return Err(InterpretError::RuntimeErrorInvalidOperandNot {
-                            line: chunk.get_line_by_idx(op_idx),
+                            line: chunk.get_line_by_idx(self.pc),
                         });
                     }
                 }
 
-                OpCode::OpReturn => {
-                    if let Some(val) = self.stack.pop() {
-                        match val {
-                            Value::String(ptr) => {
-                                let str = self.heap.get_object_pointer(ptr);
-                                println!("{}", str)
-                            }
-                            _ => println!("{}", val),
-                        }
-                    }
-                    // break;
-                }
+                OpCode::OpReturn => return Ok(()),
                 OpCode::OpPrint => {
                     if let Some(val) = self.stack.pop() {
                         match val {
@@ -128,14 +121,14 @@ impl<'mem> VM<'_> {
                     self.stack.pop();
                 }
                 OpCode::OpDefineGlobal(var_ident_ptr) => {
-                    if let Object::String(ident) = self.heap.get_object_pointer(*var_ident_ptr) {
+                    if let Object::String(ident) = self.heap.get_object_pointer(var_ident_ptr) {
                         if let Some(value) = self.stack.pop() {
                             self.globals.insert(ident.to_string(), value);
                         }
                     }
                 }
                 OpCode::OpGetGlobal(var_ident_ptr) => {
-                    if let Object::String(ident) = self.heap.get_object_pointer(*var_ident_ptr) {
+                    if let Object::String(ident) = self.heap.get_object_pointer(var_ident_ptr) {
                         if let Some(value) = self.globals.get(ident).copied() {
                             self.stack.push(value);
                         } else {
@@ -146,7 +139,7 @@ impl<'mem> VM<'_> {
                     }
                 }
                 OpCode::OpSetGlobal(var_ident_ptr) => {
-                    if let Object::String(ident) = self.heap.get_object_pointer(*var_ident_ptr) {
+                    if let Object::String(ident) = self.heap.get_object_pointer(var_ident_ptr) {
                         if let Some(new_val) = self.stack.last().copied() {
                             if let Some(curr_val) = self.globals.get_mut(ident) {
                                 *curr_val = new_val;
@@ -160,7 +153,7 @@ impl<'mem> VM<'_> {
                 }
                 OpCode::OpGetLocal(slot) => {
                     // get the variable at slot
-                    let value = self.stack.get(*slot).copied().unwrap();
+                    let value = self.stack.get(slot).copied().unwrap();
                     // push value at top of stack
                     self.stack.push(value);
                 }
@@ -168,12 +161,20 @@ impl<'mem> VM<'_> {
                     // peek at the top of stack
                     let peeked = self.stack.last().copied().unwrap();
                     // get value at slot
-                    let value = self.stack.get_mut(*slot).unwrap();
+                    let value = self.stack.get_mut(slot).unwrap();
                     // update value at slot
                     *value = peeked;
                 }
+                OpCode::OpJumpIfFalse(offset) => {
+                    if let Some(condition) = self.stack.last() {
+                        if *condition == false {
+                            self.pc += offset;
+                        }
+                    }
+                }
             };
-        })
+            self.pc += 1;
+        }
     }
 
     fn binary_op(&mut self, op: &OpCode, line: usize) -> Result<(), InterpretError> {

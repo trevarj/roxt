@@ -73,10 +73,24 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     /// Emits a constant value into the current chunk's constant vec
     fn emit_constant(&mut self, value: Value, line: usize) -> Result<(), CompilerError> {
         let idx = self.current_chunk.add_constant(value);
-        if idx > std::u16::MAX as usize {
+        if idx > u16::MAX as usize {
             return Err(CompilerError::ChunkMaxConstants);
         }
         self.emit_opcode(OpCode::OpConstant(idx as u16), line);
+        Ok(())
+    }
+
+    fn emit_jump(&mut self, op: OpCode, line: usize) -> Result<usize, CompilerError> {
+        self.emit_opcode(op, line);
+        // return index of above opcode
+        Ok(self.current_chunk.code().len() - 1)
+    }
+
+    fn patch_jump(&mut self, offset: usize) -> Result<(), CompilerError> {
+        let jump = self.current_chunk.code().len() - 1 - offset;
+        // replace placeholder jump distance
+        self.current_chunk
+            .set_code(offset, OpCode::OpJumpIfFalse(jump));
         Ok(())
     }
 
@@ -84,7 +98,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         self.emit_opcode(OpCode::OpReturn, line)
     }
 
-    fn emit_ident_const(&mut self, ident: &String, line: usize) -> Result<usize, CompilerError> {
+    fn emit_ident_const(&mut self, ident: &String) -> Result<usize, CompilerError> {
         // put ident in memory
         let ident_ptr = self.memory.add_object(Object::String(ident.clone()));
         // create constant with ident ptr
@@ -163,7 +177,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     /// True if compilation was successful, false if errors occurred.
     pub fn compile(&mut self) -> Result<(), CompilerError> {
         while self.peek()?.ttype() != TokenType::EOF {
-            self.decl();
+            self.decl()?;
         }
 
         if self.errors.is_empty() {
@@ -192,7 +206,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
                 | TokenType::Print
                 | TokenType::Return => break,
                 _ => {
-                    self.next();
+                    self.next()?;
                 }
             }
         })
@@ -207,7 +221,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         };
         Ok(if let Err(err) = result {
             self.errors.push(err);
-            self.synchronize();
+            self.synchronize()?;
         })
     }
 
@@ -225,7 +239,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         // if local, do not emit constant. store in compiler locals
         let var_ident_ptr = if self.scope_depth == 0 {
             // global
-            self.emit_ident_const(&var_ident, line)?
+            self.emit_ident_const(&var_ident)?
         } else {
             // check if variable is already defined locally
             for (ident, depth) in self.locals.iter().rev() {
@@ -266,7 +280,8 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     /// A statement
     fn stmt(&mut self) -> Result<(), CompilerError> {
         match self.peek()?.ttype() {
-            TokenType::Print => self.print_statement(),
+            TokenType::Print => self.print_stmt(),
+            TokenType::If => self.if_stmt(),
             TokenType::LeftBrace => {
                 self.expect(TokenType::LeftBrace)?;
                 self.begin_scope();
@@ -288,7 +303,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     }
 
     /// A print statement
-    fn print_statement(&mut self) -> Result<(), CompilerError> {
+    fn print_stmt(&mut self) -> Result<(), CompilerError> {
         self.expect(TokenType::Print)?;
         self.expr()?;
         let line = self.expect(TokenType::Semicolon)?.line();
@@ -296,12 +311,27 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         Ok(())
     }
 
+    /// An if-statement
+    fn if_stmt(&mut self) -> Result<(), CompilerError> {
+        // consume if and (, parse condition, consume )
+        self.expect(TokenType::If)?;
+        self.expect(TokenType::LeftParen)?;
+        self.expr()?;
+        let line = self.expect(TokenType::RightParen)?.line();
+
+        let then_jump = self.emit_jump(OpCode::OpJumpIfFalse(0xFFFF), line)?;
+        // evaluate then-statement
+        self.stmt()?;
+
+        self.patch_jump(then_jump)
+    }
+
     fn block_stmt(&mut self) -> Result<(), CompilerError> {
         Ok(
             while self.peek()?.ttype() != TokenType::RightBrace
                 && self.peek()?.ttype() != TokenType::EOF
             {
-                self.decl();
+                self.decl()?;
             },
         )
     }
@@ -330,7 +360,8 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
                 | TokenType::LessEqual
                 | TokenType::Greater
                 | TokenType::GreaterEqual => token.ttype(),
-                TokenType::Semicolon => break,
+                // Sentinel tokens
+                TokenType::Semicolon | TokenType::RightParen => break,
                 _ => {
                     eprintln!(
                         "{}",
@@ -349,7 +380,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
                     break;
                 }
                 // consume operator and get next operand
-                self.next();
+                self.next()?;
                 // calculate right hand side using the right bp as the new leftmost bp
                 self.expr_bp(right_bp)?;
                 // push binary op onto chunk stack
@@ -443,7 +474,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     /// A grouping expression bound by parentheses
     fn grouping(&mut self) -> Result<(), CompilerError> {
         // eat the left paren
-        self.next();
+        self.next()?;
         // isolate the expression within these parens
         self.expr_bp(0)?;
         // expect the closing parenthesis
@@ -499,7 +530,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
             (OpCode::OpGetLocal(index), OpCode::OpSetLocal(index))
         } else {
             // emit global variable identifier string, so it can be found during runtime
-            let index = self.emit_ident_const(&var_ident, line)?;
+            let index = self.emit_ident_const(&var_ident)?;
             (OpCode::OpGetGlobal(index), OpCode::OpSetGlobal(index))
         };
 
@@ -558,6 +589,7 @@ mod tests {
         let mut c = Compiler::new(&mut chunk, source, &mut mem);
         // compile to bytecode
         c.compile();
+        c.emit_return(0);
         // debug chunk
         println!("result: {}", chunk);
         // start up VM
@@ -578,6 +610,7 @@ mod tests {
         let mut c = Compiler::new(&mut chunk, source, &mut mem);
         // compile to bytecode
         c.compile();
+        c.emit_return(0);
         // debug chunk
         println!("result: {}", chunk);
         // start up VM
@@ -595,20 +628,49 @@ mod tests {
 
         let source = r#"
         var a = 1; 
+        var b = 10;
         {
             var a = 3;
             print a;
             {
                 var a = 4;
                 print a;
+                b = 9;
             }
         }
         print a;
+        print b;
         "#;
 
         let mut c = Compiler::new(&mut chunk, source, &mut mem);
         // compile to bytecode
         c.compile().unwrap();
+        c.emit_return(0);
+        // debug chunk
+        println!("result: {}", chunk);
+        // start up VM
+        let mut vm = VM::new(&mut mem);
+        // run bytecode in chunk
+        let result = vm.run(&chunk);
+        println!("{:?}", result);
+        println!("{:?}", mem);
+    }
+
+    #[test]
+    fn test_if_stmt() {
+        let mut mem = Memory::new();
+        let mut chunk = Chunk::new("test chunk".to_string());
+
+        let source = r#"
+        var a = 1;
+        if(a == 3) {
+            print "hello, A!";
+        }
+        "#;
+        let mut c = Compiler::new(&mut chunk, source, &mut mem);
+        // compile to bytecode
+        c.compile().unwrap();
+        c.emit_return(0);
         // debug chunk
         println!("result: {}", chunk);
         // start up VM
