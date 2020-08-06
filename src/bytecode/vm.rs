@@ -172,6 +172,9 @@ impl<'mem> VM<'_> {
                         }
                     }
                 }
+                OpCode::OpJump(offset) => {
+                    self.pc += offset;
+                }
             };
             self.pc += 1;
         }

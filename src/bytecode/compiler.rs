@@ -86,11 +86,18 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         Ok(self.current_chunk.code().len() - 1)
     }
 
-    fn patch_jump(&mut self, offset: usize) -> Result<(), CompilerError> {
+    fn patch_jump(&mut self, offset: usize, op: OpCode) -> Result<(), CompilerError> {
+        // calculate jump
         let jump = self.current_chunk.code().len() - 1 - offset;
+        // can't send enum variants as first-class args so i need to do this hack
+        let patched_op = match op {
+            OpCode::OpJump(_) => OpCode::OpJump(jump),
+            OpCode::OpJumpIfFalse(_) => OpCode::OpJumpIfFalse(jump),
+            // programmer's error
+            _ => unimplemented!(),
+        };
         // replace placeholder jump distance
-        self.current_chunk
-            .set_code(offset, OpCode::OpJumpIfFalse(jump));
+        self.current_chunk.set_code(offset, patched_op);
         Ok(())
     }
 
@@ -320,10 +327,24 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         let line = self.expect(TokenType::RightParen)?.line();
 
         let then_jump = self.emit_jump(OpCode::OpJumpIfFalse(0xFFFF), line)?;
+        // pop condition off stack before executing statement...
+        self.emit_opcode(OpCode::OpPop, line);
         // evaluate then-statement
         self.stmt()?;
 
-        self.patch_jump(then_jump)
+        let else_jump = self.emit_jump(OpCode::OpJump(0xFFFF), line)?;
+
+        self.patch_jump(then_jump, OpCode::OpJumpIfFalse(0))?;
+        // ...or pop condition off stack here before else
+        self.emit_opcode(OpCode::OpPop, line);
+
+        // handle else
+        if self.peek()?.ttype() == TokenType::Else {
+            self.expect(TokenType::Else)?;
+            self.stmt()?;
+        }
+
+        self.patch_jump(else_jump, OpCode::OpJump(0))
     }
 
     fn block_stmt(&mut self) -> Result<(), CompilerError> {
@@ -574,7 +595,7 @@ mod tests {
         let mut c = Compiler::new(&mut chunk, source, &mut mem);
         c.expr_bp(0).unwrap();
         chunk.write(OpCode::OpReturn, 123);
-        println!("result: {}", chunk);
+        println!("{}", chunk);
         let mut vm = VM::new(&mut mem);
         let result = vm.run(&chunk);
         println!("{:?}", result);
@@ -591,7 +612,7 @@ mod tests {
         c.compile();
         c.emit_return(0);
         // debug chunk
-        println!("result: {}", chunk);
+        println!("{}", chunk);
         // start up VM
         let mut vm = VM::new(&mut mem);
         // run bytecode in chunk
@@ -612,7 +633,7 @@ mod tests {
         c.compile();
         c.emit_return(0);
         // debug chunk
-        println!("result: {}", chunk);
+        println!("{}", chunk);
         // start up VM
         let mut vm = VM::new(&mut mem);
         // run bytecode in chunk
@@ -647,7 +668,7 @@ mod tests {
         c.compile().unwrap();
         c.emit_return(0);
         // debug chunk
-        println!("result: {}", chunk);
+        println!("{}", chunk);
         // start up VM
         let mut vm = VM::new(&mut mem);
         // run bytecode in chunk
@@ -664,7 +685,9 @@ mod tests {
         let source = r#"
         var a = 1;
         if(a == 3) {
-            print "hello, A!";
+            print "hello, 3!";
+        } else {
+            print "hi, number";
         }
         "#;
         let mut c = Compiler::new(&mut chunk, source, &mut mem);
@@ -672,7 +695,7 @@ mod tests {
         c.compile().unwrap();
         c.emit_return(0);
         // debug chunk
-        println!("result: {}", chunk);
+        println!("{}", chunk);
         // start up VM
         let mut vm = VM::new(&mut mem);
         // run bytecode in chunk

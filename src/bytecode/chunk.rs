@@ -26,6 +26,7 @@ pub enum OpCode {
     OpGetLocal(usize),
     OpSetLocal(usize),
     OpJumpIfFalse(usize),
+    OpJump(usize),
     OpReturn,
 }
 
@@ -148,6 +149,11 @@ impl Display for Chunk {
                     f,
                     "{:<4} line:{:<4} {:<10} {:^10}",
                     offset, line, "OP_JMP_IF_FALSE", ""
+                )?,
+                OpCode::OpJump(offset) => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    offset, line, "OP_JMP", ""
                 )?,
             }
         }
