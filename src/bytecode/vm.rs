@@ -110,7 +110,7 @@ impl<'mem> VM<'_> {
                     if let Some(val) = self.stack.pop() {
                         match val {
                             Value::String(ptr) => {
-                                let str = self.heap.get_object_pointer(ptr);
+                                let str = self.heap.get_object_by_ptr(ptr);
                                 println!("{}", str)
                             }
                             _ => println!("{}", val),
@@ -121,14 +121,14 @@ impl<'mem> VM<'_> {
                     self.stack.pop();
                 }
                 OpCode::OpDefineGlobal(var_ident_ptr) => {
-                    if let Object::String(ident) = self.heap.get_object_pointer(var_ident_ptr) {
+                    if let Object::String(ident) = self.heap.get_object_by_ptr(var_ident_ptr) {
                         if let Some(value) = self.stack.pop() {
                             self.globals.insert(ident.to_string(), value);
                         }
                     }
                 }
                 OpCode::OpGetGlobal(var_ident_ptr) => {
-                    if let Object::String(ident) = self.heap.get_object_pointer(var_ident_ptr) {
+                    if let Object::String(ident) = self.heap.get_object_by_ptr(var_ident_ptr) {
                         if let Some(value) = self.globals.get(ident).copied() {
                             self.stack.push(value);
                         } else {
@@ -139,7 +139,7 @@ impl<'mem> VM<'_> {
                     }
                 }
                 OpCode::OpSetGlobal(var_ident_ptr) => {
-                    if let Object::String(ident) = self.heap.get_object_pointer(var_ident_ptr) {
+                    if let Object::String(ident) = self.heap.get_object_by_ptr(var_ident_ptr) {
                         if let Some(new_val) = self.stack.last().copied() {
                             if let Some(curr_val) = self.globals.get_mut(ident) {
                                 *curr_val = new_val;
@@ -175,6 +175,9 @@ impl<'mem> VM<'_> {
                 OpCode::OpJump(offset) => {
                     self.pc += offset;
                 }
+                OpCode::OpLoop(offset) => {
+                    self.pc -= offset;
+                }
             };
             self.pc += 1;
         }
@@ -193,8 +196,8 @@ impl<'mem> VM<'_> {
             OpCode::OpAdd => match (a, b) {
                 (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
                 (Value::String(a), Value::String(b)) => {
-                    let str_a = self.heap.get_object_pointer(*a);
-                    let str_b = self.heap.get_object_pointer(*b);
+                    let str_a = self.heap.get_object_by_ptr(*a);
+                    let str_b = self.heap.get_object_by_ptr(*b);
                     match (str_a, str_b) {
                         (Object::String(a), Object::String(b)) => {
                             let new_str = a.clone() + b;
@@ -292,8 +295,8 @@ impl<'mem> VM<'_> {
             },
             OpCode::OpEqual => match (a, b) {
                 (Value::String(a), Value::String(b)) => {
-                    let str_a = self.heap.get_object_pointer(*a);
-                    let str_b = self.heap.get_object_pointer(*b);
+                    let str_a = self.heap.get_object_by_ptr(*a);
+                    let str_b = self.heap.get_object_by_ptr(*b);
                     match (str_a, str_b) {
                         (Object::String(a), Object::String(b)) => Value::Bool(a == b),
                         // _ => return Err(InterpretError::InterpretRuntimeErr),
@@ -303,8 +306,8 @@ impl<'mem> VM<'_> {
             },
             OpCode::OpNotEqual => match (a, b) {
                 (Value::String(a), Value::String(b)) => {
-                    let str_a = self.heap.get_object_pointer(*a);
-                    let str_b = self.heap.get_object_pointer(*b);
+                    let str_a = self.heap.get_object_by_ptr(*a);
+                    let str_b = self.heap.get_object_by_ptr(*b);
                     match (str_a, str_b) {
                         (Object::String(a), Object::String(b)) => Value::Bool(a != b),
                         // _ => return Err(InterpretError::InterpretRuntimeErr),

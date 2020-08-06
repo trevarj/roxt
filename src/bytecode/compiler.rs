@@ -101,6 +101,13 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         Ok(())
     }
 
+    fn emit_loop(&mut self, loop_start: usize) -> Result<(), CompilerError> {
+        // + 2 for ????
+        let offset = self.current_chunk.code().len() + 2 - loop_start;
+        self.emit_opcode(OpCode::OpLoop(offset), 0);
+        Ok(())
+    }
+
     fn emit_return(&mut self, line: usize) {
         self.emit_opcode(OpCode::OpReturn, line)
     }
@@ -109,7 +116,6 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         // put ident in memory
         let ident_ptr = self.memory.add_object(Object::String(ident.clone()));
         // create constant with ident ptr
-        // self.emit_constant(Value::String(ident_ptr), line)?;
         self.current_chunk.add_constant(Value::String(ident_ptr));
         Ok(ident_ptr)
     }
@@ -289,6 +295,8 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         match self.peek()?.ttype() {
             TokenType::Print => self.print_stmt(),
             TokenType::If => self.if_stmt(),
+            TokenType::While => self.while_stmt(),
+            TokenType::For => self.for_stmt(),
             TokenType::LeftBrace => {
                 self.expect(TokenType::LeftBrace)?;
                 self.begin_scope();
@@ -347,6 +355,31 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         self.patch_jump(else_jump, OpCode::OpJump(0))
     }
 
+    fn while_stmt(&mut self) -> Result<(), CompilerError> {
+        let loop_start = self.current_chunk.code().len();
+
+        self.expect(TokenType::While)?;
+        self.expect(TokenType::LeftParen)?;
+        self.expr()?;
+        let line = self.expect(TokenType::RightParen)?.line();
+
+        let exit_jump = self.emit_jump(OpCode::OpJumpIfFalse(0xFFFF), line)?;
+        self.emit_opcode(OpCode::OpPop, line);
+        self.stmt()?;
+
+        // loop
+        self.emit_loop(loop_start)?;
+
+        self.patch_jump(exit_jump, OpCode::OpJumpIfFalse(0))?;
+        self.emit_opcode(OpCode::OpPop, line);
+
+        Ok(())
+    }
+
+    fn for_stmt(&mut self) -> Result<(), CompilerError> {
+        todo!()
+    }
+
     fn block_stmt(&mut self) -> Result<(), CompilerError> {
         Ok(
             while self.peek()?.ttype() != TokenType::RightBrace
@@ -380,7 +413,9 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
                 | TokenType::Less
                 | TokenType::LessEqual
                 | TokenType::Greater
-                | TokenType::GreaterEqual => token.ttype(),
+                | TokenType::GreaterEqual 
+                | TokenType::And
+                | TokenType::Or => token.ttype(),
                 // Sentinel tokens
                 TokenType::Semicolon | TokenType::RightParen => break,
                 _ => {
@@ -400,12 +435,17 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
                     // stop parsing this expression
                     break;
                 }
-                // consume operator and get next operand
-                self.next()?;
-                // calculate right hand side using the right bp as the new leftmost bp
-                self.expr_bp(right_bp)?;
-                // push binary op onto chunk stack
-                self.binary(&operator, current_line);
+                // hacky hack to short circuit logical ops
+                if let TokenType::And | TokenType::Or = operator {
+                    self.logical_op(&operator, right_bp, current_line)?;
+                } else {
+                    // consume operator and move to next operand
+                    self.next()?;
+                    // calculate right hand side using the right bp as the new leftmost bp
+                    self.expr_bp(right_bp)?;
+                    // push binary op onto chunk stack
+                    self.binary(&operator, current_line);
+                }
 
                 continue;
             }
@@ -429,7 +469,9 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
             | TokenType::Less
             | TokenType::LessEqual
             | TokenType::Greater
-            | TokenType::GreaterEqual => Some((2, 3)),
+            | TokenType::GreaterEqual
+            | TokenType::And
+            | TokenType::Or => Some((2, 3)),
             TokenType::Plus | TokenType::Minus => Some((4, 5)),
             TokenType::Star | TokenType::Slash => Some((6, 7)),
             _ => None,
@@ -450,6 +492,41 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
             TokenType::BangEqual => self.emit_opcode(OpCode::OpNotEqual, line),
             _ => todo!(),
         }
+    }
+
+    fn logical_op(
+        &mut self,
+        operator: &TokenType,
+        right_bp: u8,
+        line: usize,
+    ) -> Result<(), CompilerError> {
+        Ok(match operator {
+            TokenType::And => {
+                let end_jump = self.emit_jump(OpCode::OpJumpIfFalse(0xFFFF), line)?;
+                self.emit_opcode(OpCode::OpPop, line);
+                // consume operator and move to next operand
+                self.next()?;
+                // calculate right hand side using the right bp as the new leftmost bp
+                self.expr_bp(right_bp)?;
+                // push binary op onto chunk stack
+                // self.binary(&operator, line);
+
+                self.patch_jump(end_jump, OpCode::OpJumpIfFalse(0))?;
+            }
+            TokenType::Or => {
+                let else_jump = self.emit_jump(OpCode::OpJumpIfFalse(0xFFFF), line)?;
+                let end_jump = self.emit_jump(OpCode::OpJump(0xFFFF), line)?;
+                self.patch_jump(else_jump, OpCode::OpJumpIfFalse(0))?;
+                self.emit_opcode(OpCode::OpPop, line);
+                // consume operator and move to next operand
+                self.next()?;
+                // calculate right hand side using the right bp as the new leftmost bp
+                self.expr_bp(right_bp)?;
+
+                self.patch_jump(end_jump, OpCode::OpJump(end_jump))?;
+            },
+            _ => unreachable!(),
+        })
     }
 
     /// A handler for unary operations
@@ -594,6 +671,7 @@ mod tests {
         let source = r#""hi" + "hi""#;
         let mut c = Compiler::new(&mut chunk, source, &mut mem);
         c.expr_bp(0).unwrap();
+        chunk.write(OpCode::OpPrint, 123);
         chunk.write(OpCode::OpReturn, 123);
         println!("{}", chunk);
         let mut vm = VM::new(&mut mem);
@@ -661,6 +739,8 @@ mod tests {
         }
         print a;
         print b;
+        a = "goodbye";
+        print a;
         "#;
 
         let mut c = Compiler::new(&mut chunk, source, &mut mem);
@@ -687,7 +767,65 @@ mod tests {
         if(a == 3) {
             print "hello, 3!";
         } else {
-            print "hi, number";
+            print "hi, 1";
+        }
+        "#;
+        let mut c = Compiler::new(&mut chunk, source, &mut mem);
+        // compile to bytecode
+        c.compile().unwrap();
+        c.emit_return(0);
+        // debug chunk
+        println!("{}", chunk);
+        // start up VM
+        let mut vm = VM::new(&mut mem);
+        // run bytecode in chunk
+        let result = vm.run(&chunk);
+        println!("{:?}", result);
+        println!("{:?}", mem);
+    }
+
+    #[test]
+    fn test_logical_ops() {
+        let mut mem = Memory::new();
+        let mut chunk = Chunk::new("test chunk".to_string());
+
+        let source = r#"
+        var a = true;
+        var b = true;
+        if(a and b) {
+            print "hello, truth!";
+        } else {
+            print "hi, false";
+        }
+        a = false;
+        if(a or b) {
+            print "hello, or!";
+        }
+        "#;
+        let mut c = Compiler::new(&mut chunk, source, &mut mem);
+        // compile to bytecode
+        c.compile().unwrap();
+        c.emit_return(0);
+        // debug chunk
+        println!("{}", chunk);
+        // start up VM
+        let mut vm = VM::new(&mut mem);
+        // run bytecode in chunk
+        let result = vm.run(&chunk);
+        println!("{:?}", result);
+        println!("{:?}", mem);
+    }
+
+    #[test]
+    fn test_loops() {
+        let mut mem = Memory::new();
+        let mut chunk = Chunk::new("test chunk".to_string());
+
+        let source = r#"
+        var i = 0;
+        while (i < 3) {
+            print i;
+            i = i + 1;
         }
         "#;
         let mut c = Compiler::new(&mut chunk, source, &mut mem);
