@@ -64,7 +64,9 @@ impl Display for Chunk {
                     "{:<4} line:{:<4} {:<10} {:^10}",
                     "nil", line, "OP_NIL", ""
                 )?,
-                OpCode::OpAdd => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_ADD", "")?,
+                OpCode::OpAdd => {
+                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_ADD", "")?
+                }
                 OpCode::OpSubtract => writeln!(
                     f,
                     "{:<4} line:{:<4} {:<10} {:^10}",
@@ -85,7 +87,9 @@ impl Display for Chunk {
                     "{:<4} line:{:<4} {:<10} {:^10}",
                     "", line, "OP_NEGATE", ""
                 )?,
-                OpCode::OpLess => writeln!(f, "{:<4} {:<4} {:<10} {:^10}", "", line, "OP_LT", "")?,
+                OpCode::OpLess => {
+                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_LT", "")?
+                }
                 OpCode::OpLessEqual => {
                     writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_LTEQ", "")?
                 }

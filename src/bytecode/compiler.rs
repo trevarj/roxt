@@ -88,7 +88,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
 
     fn patch_jump(&mut self, offset: usize, op: OpCode) -> Result<(), CompilerError> {
         // calculate jump
-        let jump = self.current_chunk.code().len() - 1 - offset;
+        let jump = self.current_chunk.code().len() - offset;
         // can't send enum variants as first-class args so i need to do this hack
         let patched_op = match op {
             OpCode::OpJump(_) => OpCode::OpJump(jump),
@@ -102,8 +102,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     }
 
     fn emit_loop(&mut self, loop_start: usize) -> Result<(), CompilerError> {
-        // + 2 for ????
-        let offset = self.current_chunk.code().len() + 2 - loop_start;
+        let offset = self.current_chunk.code().len() - loop_start;
         self.emit_opcode(OpCode::OpLoop(offset), 0);
         Ok(())
     }
@@ -377,7 +376,71 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     }
 
     fn for_stmt(&mut self) -> Result<(), CompilerError> {
-        todo!()
+        self.begin_scope();
+        self.expect(TokenType::For)?;
+        self.expect(TokenType::LeftParen)?;
+        // Initializer
+        if self.peek()?.ttype() == TokenType::Semicolon {
+            // no initializer
+            self.expect(TokenType::Semicolon)?;
+        } else if self.peek()?.ttype() == TokenType::Var {
+            self.var_decl()?;
+        } else {
+            self.expr_stmt()?;
+        }
+
+        // mark the start of the loop after initializer
+        let mut loop_start = self.current_chunk.code().len();
+
+        // Condition
+        let mut exit_jump: Option<usize> = None;
+        if self.peek()?.ttype() != TokenType::Semicolon {
+            self.expr()?;
+            let line = self.expect(TokenType::Semicolon)?.line();
+
+            // jump out if false
+            exit_jump = Some(self.emit_jump(OpCode::OpJumpIfFalse(0xFFFF), line)?);
+            // pop off condition result
+            self.emit_opcode(OpCode::OpPop, line);
+        } else {
+            // no condition...infinite loop
+            self.expect(TokenType::Semicolon)?;
+        }
+
+        // Increment clause
+        if self.peek()?.ttype() != TokenType::RightParen {
+            // jump the increment because we will do it after the body
+            let body_jump = self.emit_jump(OpCode::OpJump(0xFFFF), 0)?;
+            // mark the start of the increment statement
+            let increment_start = self.current_chunk.code().len();
+            // increment expression
+            self.expr()?;
+            self.emit_opcode(OpCode::OpPop, 0);
+            self.expect(TokenType::RightParen)?;
+
+            // emit loop to return to start after incrementing
+            self.emit_loop(loop_start)?;
+            // set the start to increment start so we can get to it after we execute the body
+            loop_start = increment_start;
+            self.patch_jump(body_jump, OpCode::OpJump(0))?;
+        } else {
+            // no increment
+            self.expect(TokenType::RightParen)?;
+        }
+
+        // for loop body
+        self.stmt()?;
+        // loop back to increment clause, which will then take us back to the condition check
+        self.emit_loop(loop_start)?;
+
+        // patch the jump for exiting the loop
+        if let Some(exit_jump) = exit_jump {
+            self.patch_jump(exit_jump, OpCode::OpJumpIfFalse(0))?;
+            // pop condition
+            self.emit_opcode(OpCode::OpPop, 0);
+        }
+        self.end_scope();
+        Ok(())
     }
 
     fn block_stmt(&mut self) -> Result<(), CompilerError> {
@@ -413,7 +476,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
                 | TokenType::Less
                 | TokenType::LessEqual
                 | TokenType::Greater
-                | TokenType::GreaterEqual 
+                | TokenType::GreaterEqual
                 | TokenType::And
                 | TokenType::Or => token.ttype(),
                 // Sentinel tokens
@@ -524,7 +587,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
                 self.expr_bp(right_bp)?;
 
                 self.patch_jump(end_jump, OpCode::OpJump(end_jump))?;
-            },
+            }
             _ => unreachable!(),
         })
     }
@@ -822,10 +885,14 @@ mod tests {
         let mut chunk = Chunk::new("test chunk".to_string());
 
         let source = r#"
-        var i = 0;
-        while (i < 3) {
-            print i;
-            i = i + 1;
+        // var i = 0;
+        // while (i < 3) {
+        //     print i;
+        //     i = i + 1;
+        // }
+
+        for(var j = 0; j < 5; j = j + 1) {
+            print j;
         }
         "#;
         let mut c = Compiler::new(&mut chunk, source, &mut mem);

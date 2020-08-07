@@ -165,18 +165,22 @@ impl<'mem> VM<'_> {
                     // update value at slot
                     *value = peeked;
                 }
+                // the continues for jump/loop avoid the increment of the pc
                 OpCode::OpJumpIfFalse(offset) => {
                     if let Some(condition) = self.stack.last() {
                         if *condition == false {
                             self.pc += offset;
+                            continue;
                         }
                     }
                 }
                 OpCode::OpJump(offset) => {
                     self.pc += offset;
+                    continue;
                 }
                 OpCode::OpLoop(offset) => {
                     self.pc -= offset;
+                    continue;
                 }
             };
             self.pc += 1;
