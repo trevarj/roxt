@@ -2,7 +2,7 @@ use crate::{
     chunk::{Chunk, OpCode},
     lexer::{Lexer, Token, TokenType},
     memory::Memory,
-    object::{Function, Object},
+    object::{Function, FunctionType, Object},
     value::Value,
 };
 use thiserror::Error;
@@ -35,17 +35,32 @@ pub struct Compiler<'input> {
     lexer: Lexer<'input>,
     /// Peeked value that is next up in the lexer
     peeked: Option<Token<'input>>,
-    /// Current function that is being compiled
-    function: Function,
     /// Heap memory
     memory: &'input mut Memory,
+    /// Vec of errors that occured during compilation
+    errors: Vec<CompilerError>,
+    state: CompilerState,
+}
+
+#[derive(Default)]
+struct CompilerState {
+    /// Current function that is being compiled
+    function: Function,
     /// Local variable scopes, vec of variable lexemes and their depths.
     /// Is None when variable is declared but not defined (initialized)
     locals: Vec<(String, Option<usize>)>,
     /// Current scope depth
     scope_depth: usize,
-    /// Vec of errors that occured during compilation
-    errors: Vec<CompilerError>,
+}
+
+impl CompilerState {
+    fn new(function: Function) -> CompilerState {
+        CompilerState {
+            function,
+            locals: Vec::new(),
+            scope_depth: 0,
+        }
+    }
 }
 
 impl<'input> Compiler<'input> {
@@ -57,16 +72,18 @@ impl<'input> Compiler<'input> {
         Compiler {
             lexer: Lexer::new(source),
             peeked: None,
-            function,
             memory,
-            locals: Vec::new(),
-            scope_depth: 0,
             errors: Vec::new(),
+            state: CompilerState::new(function),
         }
     }
 
+    fn set_state(&mut self, state: CompilerState) {
+        self.state = state;
+    }
+
     fn current_chunk(&mut self) -> &mut Chunk {
-        self.function.chunk_mut()
+        self.state.function.chunk_mut()
     }
 
     /// Emits an opcode to the current chunk
@@ -112,6 +129,7 @@ impl<'input> Compiler<'input> {
     }
 
     fn emit_return(&mut self, line: usize) {
+        self.emit_opcode(OpCode::OpNil, line);
         self.emit_opcode(OpCode::OpReturn, line)
     }
 
@@ -174,17 +192,17 @@ impl<'input> Compiler<'input> {
     }
 
     fn begin_scope(&mut self) {
-        self.scope_depth += 1;
+        self.state.scope_depth += 1;
     }
 
     fn end_scope(&mut self) {
-        self.scope_depth -= 1;
+        self.state.scope_depth -= 1;
         // clean out the locals from ending scope
-        while let Some((_, Some(depth))) = self.locals.last() {
-            if depth <= &self.scope_depth {
+        while let Some((_, Some(depth))) = self.state.locals.last() {
+            if depth <= &self.state.scope_depth {
                 break;
             }
-            self.locals.pop();
+            self.state.locals.pop();
             self.emit_opcode(OpCode::OpPop, 0);
         }
     }
@@ -198,7 +216,7 @@ impl<'input> Compiler<'input> {
 
         if self.errors.is_empty() {
             // yucky clone
-            Ok(self.function.clone())
+            Ok(self.state.function.clone())
         } else {
             // Log any errors
             for e in self.errors.iter() {
@@ -234,6 +252,7 @@ impl<'input> Compiler<'input> {
     fn decl(&mut self) -> Result<(), CompilerError> {
         let result = match self.peek()?.ttype() {
             TokenType::Var => self.var_decl(),
+            TokenType::Fun => self.fun_decl(),
             _ => self.stmt(),
         };
         Ok(if let Err(err) = result {
@@ -254,13 +273,13 @@ impl<'input> Compiler<'input> {
         let line = peeked.line();
 
         // if local, do not emit constant. store in compiler locals
-        let var_ident_ptr = if self.scope_depth == 0 {
+        let var_ident_ptr = if self.state.scope_depth == 0 {
             // global
             self.emit_ident_const(&var_ident)?
         } else {
             // check if variable is already defined locally
-            for (ident, depth) in self.locals.iter().rev() {
-                if depth.unwrap() < self.scope_depth {
+            for (ident, depth) in self.state.locals.iter().rev() {
+                if depth.unwrap() < self.state.scope_depth {
                     break;
                 }
                 if *ident == var_ident {
@@ -270,8 +289,8 @@ impl<'input> Compiler<'input> {
                     });
                 }
             }
-            self.locals.push((var_ident, None));
-            self.locals.len() - 1
+            self.state.locals.push((var_ident, None));
+            self.state.locals.len() - 1
         };
 
         match ttype {
@@ -284,13 +303,104 @@ impl<'input> Compiler<'input> {
             _ => self.emit_opcode(OpCode::OpNil, line),
         }
         self.expect(TokenType::Semicolon)?;
-        // if local don't emit OpDefineGlobal
-        if self.scope_depth == 0 {
+        // if local, don't emit OpDefineGlobal
+        if self.state.scope_depth == 0 {
             self.emit_opcode(OpCode::OpDefineGlobal(var_ident_ptr), line);
         } else {
             // set scope to know that variable was initialized
-            self.locals.last_mut().unwrap().1 = Some(self.scope_depth);
+            self.state.locals.last_mut().unwrap().1 = Some(self.state.scope_depth);
         }
+        Ok(())
+    }
+
+    fn fun_decl(&mut self) -> Result<(), CompilerError> {
+        self.expect(TokenType::Fun)?;
+        let fun_token = self.expect(TokenType::Identifier)?;
+        let fun_ident = fun_token.lexeme().to_string();
+        let line = fun_token.line();
+
+        // bind function to global or local variable
+        let fun_ident_ptr = if self.state.scope_depth == 0 {
+            // global
+            self.emit_ident_const(&fun_ident)?
+        } else {
+            // check if variable is already defined locally
+            for (ident, depth) in self.state.locals.iter().rev() {
+                if depth.unwrap() < self.state.scope_depth {
+                    break;
+                }
+                if *ident == fun_ident {
+                    return Err(CompilerError::ParserLocalVariableAlreadyDefined {
+                        found: fun_ident,
+                        line,
+                    });
+                }
+            }
+            // give it a depth so that we can use it inside the function body
+            self.state
+                .locals
+                .push((fun_ident.clone(), Some(self.state.scope_depth)));
+            self.state.locals.len() - 1
+        };
+
+        // compile function
+        self.function(fun_ident.clone(), FunctionType::Function)?;
+
+        // if local, don't emit OpDefineGlobal
+        if self.state.scope_depth == 0 {
+            self.emit_opcode(OpCode::OpDefineGlobal(fun_ident_ptr), line);
+        } else {
+            // set scope to know that variable was initialized
+            self.state.locals.last_mut().unwrap().1 = Some(self.state.scope_depth);
+        }
+
+        Ok(())
+    }
+
+    fn function(
+        &mut self,
+        fun_ident: String,
+        function_type: FunctionType,
+    ) -> Result<(), CompilerError> {
+        // fuckin hacky
+        // create a new function (the one we're about to compile)
+        let new_function = Function::new(fun_ident.clone(), 0, Chunk::new(fun_ident.clone()));
+        // create new state
+        let mut temp_state = CompilerState::new(new_function);
+        // swap to the new state
+        std::mem::swap(&mut self.state, &mut temp_state);
+        self.begin_scope();
+
+        // compile the function
+        // parse parameters and put them in the function scope
+        self.expect(TokenType::LeftParen)?;
+        while self.peek()?.ttype() != TokenType::RightParen {
+            self.state.function.inc_arity();
+            let param = self.expect(TokenType::Identifier)?;
+            let param_ident = param.lexeme().to_string();
+            self.state.locals.push((param_ident, Some(0)));
+            if self.peek()?.ttype() != TokenType::Comma {
+                break;
+            } else {
+                self.expect(TokenType::Comma)?;
+            }
+        }
+        self.expect(TokenType::RightParen)?;
+
+        // function body
+        let line = self.expect(TokenType::LeftBrace)?.line();
+        self.block_stmt()?;
+        self.expect(TokenType::RightBrace)?;
+
+        let compiled_function = std::mem::take(&mut self.state.function);
+        // restore state
+        self.set_state(temp_state);
+
+        // store function on the heap
+        let fun_ptr = self.memory.add_object(Object::Function(compiled_function));
+        println!("fun_ptr {:?}", fun_ptr);
+        self.emit_constant(Value::Object(fun_ptr), line)?;
+
         Ok(())
     }
 
@@ -483,7 +593,8 @@ impl<'input> Compiler<'input> {
                 | TokenType::Greater
                 | TokenType::GreaterEqual
                 | TokenType::And
-                | TokenType::Or => token.ttype(),
+                | TokenType::Or
+                | TokenType::LeftParen => token.ttype(),
                 // Sentinel tokens
                 TokenType::Semicolon | TokenType::RightParen => break,
                 _ => {
@@ -497,6 +608,16 @@ impl<'input> Compiler<'input> {
                     break;
                 }
             };
+
+            if let Some((l_bp, ())) = self.postfix_binding_power(&operator) {
+                if l_bp < min_bp {
+                    break;
+                }
+
+                self.next()?;
+                self.postfix(&operator, current_line)?;
+                continue;
+            }
 
             if let Some((left_bp, right_bp)) = self.infix_binding_power(&operator) {
                 if left_bp < min_bp {
@@ -546,6 +667,13 @@ impl<'input> Compiler<'input> {
         }
     }
 
+    fn postfix_binding_power(&mut self, operator: &TokenType) -> Option<(u8, ())> {
+        match operator {
+            TokenType::LeftParen => Some((12, ())),
+            _ => None,
+        }
+    }
+
     /// A handler for binary operations
     fn binary(&mut self, operator: &TokenType, line: usize) {
         match operator {
@@ -562,6 +690,34 @@ impl<'input> Compiler<'input> {
         }
     }
 
+    fn postfix(&mut self, operator: &TokenType, line: usize) -> Result<(), CompilerError> {
+        match operator {
+            TokenType::LeftParen => self.call(line),
+            _ => todo!(),
+        }
+    }
+
+    fn call(&mut self, line: usize) -> Result<(), CompilerError> {
+        let arg_count = self.argument_list()?;
+        self.emit_opcode(OpCode::OpCall(arg_count), line);
+        Ok(())
+    }
+
+    fn argument_list(&mut self) -> Result<usize, CompilerError> {
+        let mut arg_count = 0;
+        while self.peek()?.ttype() != TokenType::RightParen {
+            self.expr()?;
+            arg_count += 1;
+            if self.peek()?.ttype() != TokenType::Comma {
+                break;
+            } else {
+                self.expect(TokenType::Comma)?;
+            }
+        }
+        self.expect(TokenType::RightParen)?;
+        Ok(arg_count)
+    }
+
     fn logical_op(
         &mut self,
         operator: &TokenType,
@@ -576,9 +732,6 @@ impl<'input> Compiler<'input> {
                 self.next()?;
                 // calculate right hand side using the right bp as the new leftmost bp
                 self.expr_bp(right_bp)?;
-                // push binary op onto chunk stack
-                // self.binary(&operator, line);
-
                 self.patch_jump(end_jump, OpCode::OpJumpIfFalse(0))?;
             }
             TokenType::Or => {
@@ -712,7 +865,7 @@ impl<'input> Compiler<'input> {
 
     /// Resolves local variable index. Returns None if not found
     fn resolve_local(&mut self, ident: &String) -> Result<Option<usize>, CompilerError> {
-        for (idx, (l_ident, depth)) in self.locals.iter().enumerate().rev() {
+        for (idx, (l_ident, depth)) in self.state.locals.iter().enumerate().rev() {
             if depth.is_none() {
                 return Err(CompilerError::ParserVariableInsideOwnInitializer {
                     found: l_ident.clone(),
@@ -732,18 +885,27 @@ mod tests {
     use super::*;
     use crate::{chunk::OpCode, memory::Memory, vm::VM};
 
-    // #[test]
-    // fn test_basic_expression() {
-    //     let mut mem = Memory::new();
-    //     let source = r#"
-    //     "hi" + "hi";
-    //     1 + 2;
-    //     "#;
-    //     // let v1 = vec![OpCode::OpConstant(0), OpCode::OpConstant(1), OpCode::OpAdd, OpCode::OpPop, OpCode::OpConstant(2), OpCode::OpConstant(3), OpCode::OpAdd, OpCode::OpPop];
-    //     let mut c = Compiler::new(source, &mut mem);
-    //     assert!(c.compile().is_ok());
-    //     let chunk = c.function.chunk();
-    // }
+    #[test]
+    fn test_basic_expression() {
+        let mut mem = Memory::new();
+        let source = r#"
+        "hi" + "hi";
+        1 + 2;
+
+        fun testFun(hi) {
+            print i;
+        }
+
+        testFun();
+        "#;
+        // let v1 = vec![OpCode::OpConstant(0), OpCode::OpConstant(1), OpCode::OpAdd, OpCode::OpPop, OpCode::OpConstant(2), OpCode::OpConstant(3), OpCode::OpAdd, OpCode::OpPop];
+        let mut c = Compiler::new(
+            source,
+            &mut mem,
+            Function::new("main".to_string(), 0, Chunk::new("main".to_string())),
+        );
+        assert!(c.compile().is_ok());
+    }
 
     // #[test]
     // fn test_print_statement() {

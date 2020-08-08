@@ -41,6 +41,10 @@ pub enum InterpretError {
     },
     #[error("Undefined variable {ident:?}.")]
     RuntimeErrorUndefinedVariable { ident: String },
+    #[error("Function {ident:?} requires {args:?} arguments.")]
+    RuntimeErrorFunctionArity { ident: String, args: usize },
+    #[error("Stack Overflow.")]
+    RuntimeErrorStackOverflow,
 }
 
 impl<'mem> VM<'mem> {
@@ -77,11 +81,9 @@ impl<'mem> VM<'mem> {
         match compiler.compile() {
             Ok(fun) => {
                 println!("{}", fun.chunk());
-                self.frames.push(CallFrame {
-                    function: fun,
-                    pc: 0,
-                    stack_base: 0,
-                });
+                let func_ptr = self.heap.add_object(Object::Function(fun));
+                self.stack.push(Value::Object(func_ptr));
+                self.call_value(Value::Object(func_ptr), 0)?;
                 self.run()
             }
             Err(err) => {
@@ -93,6 +95,7 @@ impl<'mem> VM<'mem> {
 
     fn run(&mut self) -> Result<(), InterpretError> {
         loop {
+            // println!("stack: {:?}", self.stack);
             let op = if let Some(op) = self
                 .current_frame()?
                 .function
@@ -106,6 +109,7 @@ impl<'mem> VM<'mem> {
                 // program done
                 return Ok(());
             };
+            // println!("op: {:?}", op);
             match op {
                 // PRIMITIVES
                 OpCode::OpConstant(const_idx) => {
@@ -175,7 +179,16 @@ impl<'mem> VM<'mem> {
                     }
                 }
 
-                OpCode::OpReturn => return Ok(()),
+                OpCode::OpReturn => {
+                    let result = self.stack.pop().unwrap();
+                    self.frames.pop();
+                    if self.frames.len() == 0 {
+                        self.stack.pop();
+                        return Ok(());
+                    }
+
+                    self.stack.push(result)
+                }
                 OpCode::OpPrint => {
                     if let Some(val) = self.stack.pop() {
                         match val {
@@ -250,6 +263,12 @@ impl<'mem> VM<'mem> {
                 }
                 OpCode::OpLoop(offset) => {
                     self.current_frame_mut()?.pc -= offset;
+                    continue;
+                }
+                OpCode::OpCall(arg_count) => {
+                    let callee_idx = self.stack.len() - 1 - arg_count;
+                    let callee = self.stack[callee_idx];
+                    self.call_value(callee, arg_count)?;
                     continue;
                 }
             };
@@ -401,6 +420,47 @@ impl<'mem> VM<'mem> {
         self.stack.push(result);
         Ok(())
     }
+
+    fn call_value(&mut self, callee: Value, arg_count: usize) -> Result<(), InterpretError> {
+        // println!("val {:?}", callee);
+        if let Value::Object(ptr) = callee {
+            let callable = self.heap.get_object_by_ptr(ptr);
+            // println!("heap {:?}", self.heap);
+            if let Object::Function(fun) = callable {
+                // call function
+                // println!("calling {}", fun.chunk());
+                let function = fun.clone();
+                self.call(function, arg_count)?;
+            } else {
+                // Err non-callable type
+            }
+        } else {
+            // Err non-callable type
+        }
+        Ok(())
+    }
+
+    fn call(&mut self, function: Function, arg_count: usize) -> Result<(), InterpretError> {
+        if arg_count != function.arity() {
+            return Err(InterpretError::RuntimeErrorFunctionArity {
+                ident: function.name().to_string(),
+                args: function.arity(),
+            });
+        }
+
+        if self.frames.len() == 256 {
+            return Err(InterpretError::RuntimeErrorStackOverflow);
+        }
+
+        // create new callframe
+        self.frames.push(CallFrame {
+            function,
+            pc: 0,
+            stack_base: self.stack.len() - arg_count,
+        });
+        // println!("frames: {:?}", self.frames);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -408,7 +468,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_basic_expressions() {
+    fn test_basic() {
         let mut mem = Memory::new();
         let mut vm = VM::new(&mut mem);
 
@@ -422,6 +482,34 @@ mod tests {
         for ( var j = 1; j < 5; j = j + 1) {
             print j;
         }
+        "#;
+        vm.interpret(&input).unwrap();
+    }
+
+    #[test]
+    fn test_function_call() {
+        let mut mem = Memory::new();
+        let mut vm = VM::new(&mut mem);
+
+        let input = r#"
+        fun sum(a, b) {
+            print a + b;
+        }
+        sum(1, 2);
+        "#;
+        vm.interpret(&input).unwrap();
+    }
+
+    #[test]
+    fn test_fib() {
+        let mut mem = Memory::new();
+        let mut vm = VM::new(&mut mem);
+
+        let input = r#"
+        fun sum(a, b) {
+            print a + b;
+        }
+        sum(1, 2);
         "#;
         vm.interpret(&input).unwrap();
     }

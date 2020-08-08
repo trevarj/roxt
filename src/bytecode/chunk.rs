@@ -28,6 +28,7 @@ pub enum OpCode {
     OpJumpIfFalse(usize),
     OpJump(usize),
     OpLoop(usize),
+    OpCall(usize),
     OpReturn,
 }
 
@@ -164,6 +165,11 @@ impl Display for Chunk {
                     f,
                     "{:<4} line:{:<4} {:<10} {:^10}",
                     offset, line, "OP_LOOP", ""
+                )?,
+                OpCode::OpCall(arg_count) => writeln!(
+                    f,
+                    "{:<4} line:{:<4} {:<10} {:^10}",
+                    arg_count, line, "OP_CALL", ""
                 )?,
             }
         }
