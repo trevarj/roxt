@@ -32,7 +32,7 @@ pub enum OpCode {
 }
 
 /// A Chunk of code that will be sent to the VM
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct Chunk {
     name: String,
     code: Vec<OpCode>,

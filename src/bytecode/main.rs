@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // get memory unit
     let mut mem = Memory::new();
     // start VM
-    let vm = VM::new(&mut mem);
+    let mut vm = VM::new(&mut mem);
 
     // If a path was provided, we will process a file
     // otherwise, we will go to a prompt.
@@ -39,15 +39,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Open file
         let file = File::open(path)?;
         // Process the file
-        process_file(&file, &vm)?;
+        process_file(&file, &mut vm)?;
     } else {
-        repl(&vm)?;
+        repl(&mut vm)?;
     }
 
     Ok(())
 }
 
-fn process_file(file: &File, vm: &VM) -> Result<(), Box<dyn std::error::Error>> {
+fn process_file(file: &File, vm: &mut VM) -> Result<(), Box<dyn std::error::Error>> {
     let mut reader = BufReader::new(file);
     let mut input = String::new();
     // Reading whole file to string...is bad...
@@ -56,7 +56,7 @@ fn process_file(file: &File, vm: &VM) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
-fn repl(vm: &VM) -> Result<(), Box<dyn std::error::Error>> {
+fn repl(vm: &mut vm::VM<'_>) -> Result<(), Box<dyn std::error::Error>> {
     println!("Running prompt...");
     loop {
         print!("> ");
@@ -76,33 +76,4 @@ fn repl(vm: &VM) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chunk::{Chunk, OpCode};
-    use vm::VM;
-
-    #[test]
-    fn test_vm() {
-        let mut mem = Memory::new();
-        let mut c = Chunk::new("test chunk".to_string());
-        // a = -1.2
-        let idx = c.add_constant(value::Value::Number(1.2));
-        c.write(OpCode::OpConstant(idx as u16), 123);
-        c.write(OpCode::OpNegate, 123);
-
-        // b = 2
-        let idx = c.add_constant(value::Value::Number(2.));
-        c.write(OpCode::OpConstant(idx as u16), 123);
-
-        // a * b
-        c.write(OpCode::OpMultiply, 123);
-
-        c.write(OpCode::OpReturn, 123);
-        println!("{}", c);
-        let mut vm = VM::new(&mut mem);
-        let result = vm.run(&c);
-    }
 }

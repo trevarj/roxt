@@ -2,7 +2,7 @@ use crate::{
     chunk::{Chunk, OpCode},
     lexer::{Lexer, Token, TokenType},
     memory::Memory,
-    object::Object,
+    object::{Function, Object},
     value::Value,
 };
 use thiserror::Error;
@@ -30,13 +30,13 @@ pub enum CompilerError {
     #[error("Cannot use variable {found:?} inside its initilizer on line {line:?}.")]
     ParserVariableInsideOwnInitializer { found: String, line: usize },
 }
-pub struct Compiler<'ch, 'input> {
+pub struct Compiler<'input> {
     /// The Lexer used to tokenize the source
     lexer: Lexer<'input>,
     /// Peeked value that is next up in the lexer
     peeked: Option<Token<'input>>,
-    /// Current chunk that is being compiled
-    current_chunk: &'ch mut Chunk,
+    /// Current function that is being compiled
+    function: Function,
     /// Heap memory
     memory: &'input mut Memory,
     /// Local variable scopes, vec of variable lexemes and their depths.
@@ -48,16 +48,16 @@ pub struct Compiler<'ch, 'input> {
     errors: Vec<CompilerError>,
 }
 
-impl<'ch, 'input> Compiler<'ch, 'input> {
+impl<'input> Compiler<'input> {
     pub fn new(
-        chunk: &'ch mut Chunk,
         source: &'input str,
         memory: &'input mut Memory,
-    ) -> Compiler<'ch, 'input> {
+        function: Function,
+    ) -> Compiler<'input> {
         Compiler {
             lexer: Lexer::new(source),
             peeked: None,
-            current_chunk: chunk,
+            function,
             memory,
             locals: Vec::new(),
             scope_depth: 0,
@@ -65,14 +65,18 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         }
     }
 
+    fn current_chunk(&mut self) -> &mut Chunk {
+        self.function.chunk_mut()
+    }
+
     /// Emits an opcode to the current chunk
     fn emit_opcode(&mut self, op: OpCode, line: usize) {
-        self.current_chunk.write(op, line);
+        self.current_chunk().write(op, line);
     }
 
     /// Emits a constant value into the current chunk's constant vec
     fn emit_constant(&mut self, value: Value, line: usize) -> Result<(), CompilerError> {
-        let idx = self.current_chunk.add_constant(value);
+        let idx = self.current_chunk().add_constant(value);
         if idx > u16::MAX as usize {
             return Err(CompilerError::ChunkMaxConstants);
         }
@@ -83,12 +87,12 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     fn emit_jump(&mut self, op: OpCode, line: usize) -> Result<usize, CompilerError> {
         self.emit_opcode(op, line);
         // return index of above opcode
-        Ok(self.current_chunk.code().len() - 1)
+        Ok(self.current_chunk().code().len() - 1)
     }
 
     fn patch_jump(&mut self, offset: usize, op: OpCode) -> Result<(), CompilerError> {
         // calculate jump
-        let jump = self.current_chunk.code().len() - offset;
+        let jump = self.current_chunk().code().len() - offset;
         // can't send enum variants as first-class args so i need to do this hack
         let patched_op = match op {
             OpCode::OpJump(_) => OpCode::OpJump(jump),
@@ -97,12 +101,12 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
             _ => unimplemented!(),
         };
         // replace placeholder jump distance
-        self.current_chunk.set_code(offset, patched_op);
+        self.current_chunk().set_code(offset, patched_op);
         Ok(())
     }
 
     fn emit_loop(&mut self, loop_start: usize) -> Result<(), CompilerError> {
-        let offset = self.current_chunk.code().len() - loop_start;
+        let offset = self.current_chunk().code().len() - loop_start;
         self.emit_opcode(OpCode::OpLoop(offset), 0);
         Ok(())
     }
@@ -115,7 +119,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         // put ident in memory
         let ident_ptr = self.memory.add_object(Object::String(ident.clone()));
         // create constant with ident ptr
-        self.current_chunk.add_constant(Value::String(ident_ptr));
+        self.current_chunk().add_constant(Value::String(ident_ptr));
         Ok(ident_ptr)
     }
 
@@ -187,13 +191,14 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
 
     /// Compiles source code
     /// True if compilation was successful, false if errors occurred.
-    pub fn compile(&mut self) -> Result<(), CompilerError> {
+    pub fn compile(&mut self) -> Result<Function, CompilerError> {
         while self.peek()?.ttype() != TokenType::EOF {
             self.decl()?;
         }
 
         if self.errors.is_empty() {
-            Ok(())
+            // yucky clone
+            Ok(self.function.clone())
         } else {
             // Log any errors
             for e in self.errors.iter() {
@@ -355,7 +360,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     }
 
     fn while_stmt(&mut self) -> Result<(), CompilerError> {
-        let loop_start = self.current_chunk.code().len();
+        let loop_start = self.current_chunk().code().len();
 
         self.expect(TokenType::While)?;
         self.expect(TokenType::LeftParen)?;
@@ -390,7 +395,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
         }
 
         // mark the start of the loop after initializer
-        let mut loop_start = self.current_chunk.code().len();
+        let mut loop_start = self.current_chunk().code().len();
 
         // Condition
         let mut exit_jump: Option<usize> = None;
@@ -412,7 +417,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
             // jump the increment because we will do it after the body
             let body_jump = self.emit_jump(OpCode::OpJump(0xFFFF), 0)?;
             // mark the start of the increment statement
-            let increment_start = self.current_chunk.code().len();
+            let increment_start = self.current_chunk().code().len();
             // increment expression
             self.expr()?;
             self.emit_opcode(OpCode::OpPop, 0);
@@ -616,7 +621,7 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
     }
 
     /// A primary token
-    /// or a left parenthesis to trigger a grouping expression
+    /// or a left parenthesis to trigger a grouping/call expression
     fn primary(&mut self) -> Result<(), CompilerError> {
         let next = self.peek()?;
         match next.ttype() {
@@ -725,187 +730,185 @@ impl<'ch, 'input> Compiler<'ch, 'input> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{memory::Memory, vm::VM};
+    use crate::{chunk::OpCode, memory::Memory, vm::VM};
 
-    #[test]
-    fn test_basic_expression() {
-        let mut mem = Memory::new();
-        let mut chunk = Chunk::new("test chunk".to_string());
-        let source = r#""hi" + "hi""#;
-        let mut c = Compiler::new(&mut chunk, source, &mut mem);
-        c.expr_bp(0).unwrap();
-        chunk.write(OpCode::OpPrint, 123);
-        chunk.write(OpCode::OpReturn, 123);
-        println!("{}", chunk);
-        let mut vm = VM::new(&mut mem);
-        let result = vm.run(&chunk);
-        println!("{:?}", result);
-    }
+    // #[test]
+    // fn test_basic_expression() {
+    //     let mut mem = Memory::new();
+    //     let source = r#"
+    //     "hi" + "hi";
+    //     1 + 2;
+    //     "#;
+    //     // let v1 = vec![OpCode::OpConstant(0), OpCode::OpConstant(1), OpCode::OpAdd, OpCode::OpPop, OpCode::OpConstant(2), OpCode::OpConstant(3), OpCode::OpAdd, OpCode::OpPop];
+    //     let mut c = Compiler::new(source, &mut mem);
+    //     assert!(c.compile().is_ok());
+    //     let chunk = c.function.chunk();
+    // }
 
-    #[test]
-    fn test_print_statement() {
-        let mut mem = Memory::new();
-        let mut chunk = Chunk::new("test chunk".to_string());
+    // #[test]
+    // fn test_print_statement() {
+    //     let mut mem = Memory::new();
+    //     let mut chunk = Chunk::new("test chunk".to_string());
 
-        let source = r#"print "hi";"#;
-        let mut c = Compiler::new(&mut chunk, source, &mut mem);
-        // compile to bytecode
-        c.compile();
-        c.emit_return(0);
-        // debug chunk
-        println!("{}", chunk);
-        // start up VM
-        let mut vm = VM::new(&mut mem);
-        // run bytecode in chunk
-        let result = vm.run(&chunk);
-        println!("{:?}", result);
-    }
+    //     let source = r#"print "hi";"#;
+    //     let mut c = Compiler::new(&mut chunk, source, &mut mem);
+    //     // compile to bytecode
+    //     c.compile();
+    //     c.emit_return(0);
+    //     // debug chunk
+    //     println!("{}", chunk);
+    //     // start up VM
+    //     let mut vm = VM::new(&mut mem);
+    //     // run bytecode in chunk
+    //     let result = vm.run(&chunk);
+    //     println!("{:?}", result);
+    // }
 
-    #[test]
-    fn test_global_vars() {
-        let mut mem = Memory::new();
-        let mut chunk = Chunk::new("test chunk".to_string());
+    // #[test]
+    // fn test_global_vars() {
+    //     let mut mem = Memory::new();
+    //     let mut chunk = Chunk::new("test chunk".to_string());
 
-        // let source = r#"var a = "hello"; print a + "mister"; a = "bye"; print a;"#;
-        let source = r#"var a = "hello"; a = 5; print a;"#;
+    //     // let source = r#"var a = "hello"; print a + "mister"; a = "bye"; print a;"#;
+    //     let source = r#"var a = "hello"; a = 5; print a;"#;
 
-        let mut c = Compiler::new(&mut chunk, source, &mut mem);
-        // compile to bytecode
-        c.compile();
-        c.emit_return(0);
-        // debug chunk
-        println!("{}", chunk);
-        // start up VM
-        let mut vm = VM::new(&mut mem);
-        // run bytecode in chunk
-        let result = vm.run(&chunk);
-        println!("{:?}", result);
-        println!("{:?}", mem);
-    }
+    //     let mut c = Compiler::new(&mut chunk, source, &mut mem);
+    //     // compile to bytecode
+    //     c.compile();
+    //     c.emit_return(0);
+    //     // debug chunk
+    //     println!("{}", chunk);
+    //     // start up VM
+    //     let mut vm = VM::new(&mut mem);
+    //     // run bytecode in chunk
+    //     let result = vm.run(&chunk);
+    //     println!("{:?}", result);
+    //     println!("{:?}", mem);
+    // }
 
-    #[test]
-    fn test_local_vars() {
-        let mut mem = Memory::new();
-        let mut chunk = Chunk::new("test chunk".to_string());
+    // #[test]
+    // fn test_local_vars() {
+    //     let mut mem = Memory::new();
+    //     let mut chunk = Chunk::new("test chunk".to_string());
 
-        let source = r#"
-        var a = 1; 
-        var b = 10;
-        {
-            var a = 3;
-            print a;
-            {
-                var a = 4;
-                print a;
-                b = 9;
-            }
-        }
-        print a;
-        print b;
-        a = "goodbye";
-        print a;
-        "#;
+    //     let source = r#"
+    //     var a = 1;
+    //     var b = 10;
+    //     {
+    //         var a = 3;
+    //         print a;
+    //         {
+    //             var a = 4;
+    //             print a;
+    //             b = 9;
+    //         }
+    //     }
+    //     print a;
+    //     print b;
+    //     a = "goodbye";
+    //     print a;
+    //     "#;
 
-        let mut c = Compiler::new(&mut chunk, source, &mut mem);
-        // compile to bytecode
-        c.compile().unwrap();
-        c.emit_return(0);
-        // debug chunk
-        println!("{}", chunk);
-        // start up VM
-        let mut vm = VM::new(&mut mem);
-        // run bytecode in chunk
-        let result = vm.run(&chunk);
-        println!("{:?}", result);
-        println!("{:?}", mem);
-    }
+    //     let mut c = Compiler::new(&mut chunk, source, &mut mem);
+    //     // compile to bytecode
+    //     c.compile().unwrap();
+    //     c.emit_return(0);
+    //     // debug chunk
+    //     println!("{}", chunk);
+    //     // start up VM
+    //     let mut vm = VM::new(&mut mem);
+    //     // run bytecode in chunk
+    //     let result = vm.run(&chunk);
+    //     println!("{:?}", result);
+    //     println!("{:?}", mem);
+    // }
 
-    #[test]
-    fn test_if_stmt() {
-        let mut mem = Memory::new();
-        let mut chunk = Chunk::new("test chunk".to_string());
+    // #[test]
+    // fn test_if_stmt() {
+    //     let mut mem = Memory::new();
+    //     let mut chunk = Chunk::new("test chunk".to_string());
 
-        let source = r#"
-        var a = 1;
-        if(a == 3) {
-            print "hello, 3!";
-        } else {
-            print "hi, 1";
-        }
-        "#;
-        let mut c = Compiler::new(&mut chunk, source, &mut mem);
-        // compile to bytecode
-        c.compile().unwrap();
-        c.emit_return(0);
-        // debug chunk
-        println!("{}", chunk);
-        // start up VM
-        let mut vm = VM::new(&mut mem);
-        // run bytecode in chunk
-        let result = vm.run(&chunk);
-        println!("{:?}", result);
-        println!("{:?}", mem);
-    }
+    //     let source = r#"
+    //     var a = 1;
+    //     if(a == 3) {
+    //         print "hello, 3!";
+    //     } else {
+    //         print "hi, 1";
+    //     }
+    //     "#;
+    //     let mut c = Compiler::new(&mut chunk, source, &mut mem);
+    //     // compile to bytecode
+    //     c.compile().unwrap();
+    //     c.emit_return(0);
+    //     // debug chunk
+    //     println!("{}", chunk);
+    //     // start up VM
+    //     let mut vm = VM::new(&mut mem);
+    //     // run bytecode in chunk
+    //     let result = vm.run(&chunk);
+    //     println!("{:?}", result);
+    //     println!("{:?}", mem);
+    // }
 
-    #[test]
-    fn test_logical_ops() {
-        let mut mem = Memory::new();
-        let mut chunk = Chunk::new("test chunk".to_string());
+    // #[test]
+    // fn test_logical_ops() {
+    //     let mut mem = Memory::new();
+    //     let mut chunk = Chunk::new("test chunk".to_string());
 
-        let source = r#"
-        var a = true;
-        var b = true;
-        if(a and b) {
-            print "hello, truth!";
-        } else {
-            print "hi, false";
-        }
-        a = false;
-        if(a or b) {
-            print "hello, or!";
-        }
-        "#;
-        let mut c = Compiler::new(&mut chunk, source, &mut mem);
-        // compile to bytecode
-        c.compile().unwrap();
-        c.emit_return(0);
-        // debug chunk
-        println!("{}", chunk);
-        // start up VM
-        let mut vm = VM::new(&mut mem);
-        // run bytecode in chunk
-        let result = vm.run(&chunk);
-        println!("{:?}", result);
-        println!("{:?}", mem);
-    }
+    //     let source = r#"
+    //     var a = true;
+    //     var b = true;
+    //     if(a and b) {
+    //         print "hello, truth!";
+    //     } else {
+    //         print "hi, false";
+    //     }
+    //     a = false;
+    //     if(a or b) {
+    //         print "hello, or!";
+    //     }
+    //     "#;
+    //     let mut c = Compiler::new(&mut chunk, source, &mut mem);
+    //     // compile to bytecode
+    //     c.compile().unwrap();
+    //     c.emit_return(0);
+    //     // debug chunk
+    //     println!("{}", chunk);
+    //     // start up VM
+    //     let mut vm = VM::new(&mut mem);
+    //     // run bytecode in chunk
+    //     let result = vm.run(&chunk);
+    //     println!("{:?}", result);
+    //     println!("{:?}", mem);
+    // }
 
-    #[test]
-    fn test_loops() {
-        let mut mem = Memory::new();
-        let mut chunk = Chunk::new("test chunk".to_string());
+    // #[test]
+    // fn test_loops() {
+    //     let mut mem = Memory::new();
+    //     let mut chunk = Chunk::new("test chunk".to_string());
 
-        let source = r#"
-        // var i = 0;
-        // while (i < 3) {
-        //     print i;
-        //     i = i + 1;
-        // }
+    //     let source = r#"
+    //     // var i = 0;
+    //     // while (i < 3) {
+    //     //     print i;
+    //     //     i = i + 1;
+    //     // }
 
-        for(var j = 0; j < 5; j = j + 1) {
-            print j;
-        }
-        "#;
-        let mut c = Compiler::new(&mut chunk, source, &mut mem);
-        // compile to bytecode
-        c.compile().unwrap();
-        c.emit_return(0);
-        // debug chunk
-        println!("{}", chunk);
-        // start up VM
-        let mut vm = VM::new(&mut mem);
-        // run bytecode in chunk
-        let result = vm.run(&chunk);
-        println!("{:?}", result);
-        println!("{:?}", mem);
-    }
+    //     for(var j = 0; j < 5; j = j + 1) {
+    //         print j;
+    //     }
+    //     "#;
+    //     let mut c = Compiler::new(&mut chunk, source, &mut mem);
+    //     // compile to bytecode
+    //     c.compile().unwrap();
+    //     c.emit_return(0);
+    //     // debug chunk
+    //     println!("{}", chunk);
+    //     // start up VM
+    //     let mut vm = VM::new(&mut mem);
+    //     // run bytecode in chunk
+    //     let result = vm.run(&chunk);
+    //     println!("{:?}", result);
+    //     println!("{:?}", mem);
+    // }
 }
