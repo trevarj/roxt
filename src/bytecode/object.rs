@@ -1,10 +1,10 @@
-use crate::chunk::Chunk;
-use std::fmt::Display;
+use crate::{chunk::Chunk, value::Value};
+use std::fmt::{Debug, Display};
 
-#[derive(Debug)]
 pub enum Object {
     String(String),
     Function(Function),
+    Native(Box<dyn Fn(usize, Vec<Value>) -> Value>),
 }
 
 impl Display for Object {
@@ -12,6 +12,17 @@ impl Display for Object {
         match self {
             Object::String(s) => write!(f, "{}", s),
             Object::Function(fun) => write!(f, "{}", fun),
+            Object::Native(_) => write!(f, "<native fn>"),
+        }
+    }
+}
+
+impl Debug for Object {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Object::String(s) => std::fmt::Debug::fmt(s, f),
+            Object::Function(fun) => std::fmt::Debug::fmt(fun, f),
+            Object::Native(_) => write!(f, "<native fn>"),
         }
     }
 }

@@ -5,7 +5,10 @@ use crate::{
     memory::Memory,
     object::{Function, FunctionType, Object},
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use thiserror::Error;
 
 pub struct VM<'mem> {
@@ -83,6 +86,7 @@ impl<'mem> VM<'mem> {
             0,
             Chunk::new("main".to_string()),
         );
+        self.define_native("clock".to_string(), Box::new(native_clock));
         let mut compiler = Compiler::new(input, self.heap, function);
 
         match compiler.compile() {
@@ -92,7 +96,7 @@ impl<'mem> VM<'mem> {
                 self.stack.push(Value::Object(func_ptr));
                 self.call_value(Value::Object(func_ptr), 0)?;
                 if let Err(err) = self.run() {
-                    eprintln!("{}", err);
+                    eprintln!("Runtime error: {}", err);
                     for (count, cf) in self.frames.iter().enumerate() {
                         let line = cf.function.chunk().get_line_by_idx(cf.pc);
                         let func_name = cf.function.name();
@@ -323,7 +327,6 @@ impl<'mem> VM<'mem> {
                 (Value::Object(a), Value::String(b)) => {
                     let str_a = self.heap.get_object_by_ptr(*a);
                     let str_b = self.heap.get_object_by_ptr(*b);
-                    println!("a {:?} b {:?}", str_a, str_b);
                     match (str_a, str_b) {
                         (Object::String(a), Object::String(b)) => {
                             let new_str = a.clone() + b;
@@ -455,19 +458,28 @@ impl<'mem> VM<'mem> {
     }
 
     fn call_value(&mut self, callee: Value, arg_count: usize) -> Result<(), InterpretError> {
-        // println!("val {:?}", callee);
         if let Value::Object(ptr) = callee {
             let callable = self.heap.get_object_by_ptr(ptr);
             // println!("heap {:?}", self.heap);
-            if let Object::Function(fun) = callable {
-                // call function
-                // println!("calling {}", fun.chunk());
-                let function = fun.clone();
-                self.call(function, arg_count)?;
-            } else {
-                return Err(InterpretError::RuntimeErrorNonCallableType {
-                    ttype: callable.to_string(),
-                });
+            match callable {
+                Object::Function(fun) => {
+                    // call function
+                    let function = fun.clone();
+                    self.call(function, arg_count)?;
+                }
+                Object::Native(fun) => {
+                    let args: Vec<Value> =
+                        self.stack.drain(self.stack.len() - arg_count..).collect();
+                    let result = fun.call((arg_count, args));
+                    self.stack.push(result);
+                    // have to do this cause we continue out of OpCall...
+                    self.current_frame_mut()?.pc += 1;
+                }
+                non_callable => {
+                    return Err(InterpretError::RuntimeErrorNonCallableType {
+                        ttype: non_callable.to_string(),
+                    })
+                }
             }
         } else {
             return Err(InterpretError::RuntimeErrorNonCallableType {
@@ -498,6 +510,22 @@ impl<'mem> VM<'mem> {
         // println!("frames: {:?}", self.frames);
         Ok(())
     }
+
+    fn define_native(&mut self, name: String, function: Box<dyn Fn(usize, Vec<Value>) -> Value>) {
+        let fn_ptr = self.heap.add_object(Object::Native(function));
+        let native_value = Value::Object(fn_ptr);
+        self.globals.insert(name, native_value);
+    }
+}
+
+fn native_clock(_arg_count: usize, _args: Vec<Value>) -> Value {
+    // get time since epoch
+    Value::Number(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as f32,
+    )
 }
 
 #[cfg(test)]
@@ -539,6 +567,7 @@ mod tests {
             return "5 bucks";
         }
         print "here is " + gimme() + "!";
+        print clock();
         "#;
         vm.interpret(&input).unwrap();
     }

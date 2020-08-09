@@ -13,21 +13,21 @@ pub enum CompilerError {
     CompilationFailedWithErrors,
     #[error("Max constants in chunk.")]
     ChunkMaxConstants,
-    #[error("Expected {expect:?}, found {found:?} on line {line:?}.")]
+    #[error("Expected {expect}, found {found} on line {line:?}.")]
     ParserExpectedTokenError {
         expect: String,
         found: String,
         line: usize,
     },
-    #[error("Expected literal value, found {found:?} on line {line:?}.")]
+    #[error("Expected literal value, found {found} on line {line:?}.")]
     ParserUnexpectedValue { found: String, line: usize },
-    #[error("Unexpected operator, found {found:?} on line {line:?}.")]
+    #[error("Unexpected operator, found {found} on line {line:?}.")]
     ParserUnexpectedOperator { found: String, line: usize },
-    #[error("Unable to parse number, found {found:?} on line {line:?}.")]
+    #[error("Unable to parse number, found {found} on line {line:?}.")]
     ParserFloatParseError { found: String, line: usize },
-    #[error("Local variable {found:?} already defined in current scope on line {line:?}.")]
+    #[error("Local variable {found} already defined in current scope on line {line:?}.")]
     ParserLocalVariableAlreadyDefined { found: String, line: usize },
-    #[error("Cannot use variable {found:?} inside its initilizer on line {line:?}.")]
+    #[error("Cannot use variable {found} inside its initilizer on line {line:?}.")]
     ParserVariableInsideOwnInitializer { found: String, line: usize },
     #[error("Cannot return from top level of script, line {line:?}.")]
     ParserReturnFromTopLevel { line: usize },

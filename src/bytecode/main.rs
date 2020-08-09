@@ -1,4 +1,5 @@
 #![feature(drain_filter)]
+#![feature(fn_traits)]
 use argh::FromArgs;
 use memory::Memory;
 use std::fs::File;
