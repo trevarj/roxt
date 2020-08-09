@@ -29,6 +29,8 @@ pub enum CompilerError {
     ParserLocalVariableAlreadyDefined { found: String, line: usize },
     #[error("Cannot use variable {found:?} inside its initilizer on line {line:?}.")]
     ParserVariableInsideOwnInitializer { found: String, line: usize },
+    #[error("Cannot return from top level of script, line {line:?}.")]
+    ParserReturnFromTopLevel { line: usize },
 }
 pub struct Compiler<'input> {
     /// The Lexer used to tokenize the source
@@ -42,7 +44,7 @@ pub struct Compiler<'input> {
     state: CompilerState,
 }
 
-#[derive(Default)]
+#[derive(Debug)]
 struct CompilerState {
     /// Current function that is being compiled
     function: Function,
@@ -364,7 +366,12 @@ impl<'input> Compiler<'input> {
     ) -> Result<(), CompilerError> {
         // fuckin hacky
         // create a new function (the one we're about to compile)
-        let new_function = Function::new(fun_ident.clone(), 0, Chunk::new(fun_ident.clone()));
+        let new_function = Function::new(
+            fun_ident.clone(),
+            FunctionType::Function,
+            0,
+            Chunk::new(fun_ident.clone()),
+        );
         // create new state
         let mut temp_state = CompilerState::new(new_function);
         // swap to the new state
@@ -392,13 +399,16 @@ impl<'input> Compiler<'input> {
         self.block_stmt()?;
         self.expect(TokenType::RightBrace)?;
 
-        let compiled_function = std::mem::take(&mut self.state.function);
+        // return from the function
+        self.emit_return(line);
+
+        // let compiled_function = std::mem::take(&mut self.state.function);
+        let compiled_function = self.state.function.clone();
         // restore state
         self.set_state(temp_state);
 
         // store function on the heap
         let fun_ptr = self.memory.add_object(Object::Function(compiled_function));
-        println!("fun_ptr {:?}", fun_ptr);
         self.emit_constant(Value::Object(fun_ptr), line)?;
 
         Ok(())
@@ -411,6 +421,7 @@ impl<'input> Compiler<'input> {
             TokenType::If => self.if_stmt(),
             TokenType::While => self.while_stmt(),
             TokenType::For => self.for_stmt(),
+            TokenType::Return => self.return_stmt(),
             TokenType::LeftBrace => {
                 self.expect(TokenType::LeftBrace)?;
                 self.begin_scope();
@@ -568,6 +579,23 @@ impl<'input> Compiler<'input> {
         )
     }
 
+    fn return_stmt(&mut self) -> Result<(), CompilerError> {
+        let line = self.expect(TokenType::Return)?.line();
+        // prevent return from FunctionType script
+        if let FunctionType::Script = self.state.function.fun_type() {
+            return Err(CompilerError::ParserReturnFromTopLevel { line });
+        }
+        if self.peek()?.ttype() == TokenType::Semicolon {
+            self.expect(TokenType::Semicolon)?;
+            self.emit_return(line);
+        } else {
+            self.expr()?;
+            self.expect(TokenType::Semicolon)?;
+            self.emit_opcode(OpCode::OpReturn, line);
+        }
+        Ok(())
+    }
+
     /// An expression that calls expression with binding power
     fn expr(&mut self) -> Result<(), CompilerError> {
         self.expr_bp(0)
@@ -596,7 +624,7 @@ impl<'input> Compiler<'input> {
                 | TokenType::Or
                 | TokenType::LeftParen => token.ttype(),
                 // Sentinel tokens
-                TokenType::Semicolon | TokenType::RightParen => break,
+                TokenType::Semicolon | TokenType::RightParen | TokenType::Comma => break,
                 _ => {
                     eprintln!(
                         "{}",
@@ -902,7 +930,12 @@ mod tests {
         let mut c = Compiler::new(
             source,
             &mut mem,
-            Function::new("main".to_string(), 0, Chunk::new("main".to_string())),
+            Function::new(
+                "main".to_string(),
+                FunctionType::Script,
+                0,
+                Chunk::new("main".to_string()),
+            ),
         );
         assert!(c.compile().is_ok());
     }

@@ -16,25 +16,36 @@ impl Display for Object {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Function {
     name: String,
+    fun_type: FunctionType,
     arity: usize,
     chunk: Chunk,
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum FunctionType {
     Script,
     Function,
 }
 
 impl Function {
-    pub fn new(name: String, arity: usize, chunk: Chunk) -> Function {
-        Function { name, arity, chunk }
+    pub fn new(name: String, fun_type: FunctionType, arity: usize, chunk: Chunk) -> Function {
+        Function {
+            name,
+            fun_type,
+            arity,
+            chunk,
+        }
     }
 
     pub fn name(&self) -> &String {
         &self.name
+    }
+
+    pub fn fun_type(&self) -> &FunctionType {
+        &self.fun_type
     }
 
     pub fn arity(&self) -> usize {

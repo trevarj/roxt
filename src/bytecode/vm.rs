@@ -3,7 +3,7 @@ use super::value::Value;
 use crate::{
     compiler::Compiler,
     memory::Memory,
-    object::{Function, Object},
+    object::{Function, FunctionType, Object},
 };
 use std::collections::HashMap;
 use thiserror::Error;
@@ -45,6 +45,8 @@ pub enum InterpretError {
     RuntimeErrorFunctionArity { ident: String, args: usize },
     #[error("Stack Overflow.")]
     RuntimeErrorStackOverflow,
+    #[error("Attempted to call function on non-callable type - {ttype:?}.")]
+    RuntimeErrorNonCallableType { ttype: String },
 }
 
 impl<'mem> VM<'mem> {
@@ -75,7 +77,12 @@ impl<'mem> VM<'mem> {
     }
 
     pub fn interpret(&mut self, input: &str) -> Result<(), InterpretError> {
-        let function = Function::new("main".to_string(), 0, Chunk::new("main".to_string()));
+        let function = Function::new(
+            "main".to_string(),
+            FunctionType::Script,
+            0,
+            Chunk::new("main".to_string()),
+        );
         let mut compiler = Compiler::new(input, self.heap, function);
 
         match compiler.compile() {
@@ -84,11 +91,22 @@ impl<'mem> VM<'mem> {
                 let func_ptr = self.heap.add_object(Object::Function(fun));
                 self.stack.push(Value::Object(func_ptr));
                 self.call_value(Value::Object(func_ptr), 0)?;
-                self.run()
+                if let Err(err) = self.run() {
+                    eprintln!("{}", err);
+                    for (count, cf) in self.frames.iter().enumerate() {
+                        let line = cf.function.chunk().get_line_by_idx(cf.pc);
+                        let func_name = cf.function.name();
+                        eprintln!("{:1$}{} {}():{}", "", count, func_name, line);
+                    }
+                    Ok(())
+                } else {
+                    Ok(())
+                }
             }
             Err(err) => {
                 eprintln!("{}", err);
-                Err(InterpretError::InterpretCompileErr)
+                // Err(InterpretError::InterpretCompileErr)
+                Ok(())
             }
         }
     }
@@ -181,12 +199,14 @@ impl<'mem> VM<'mem> {
 
                 OpCode::OpReturn => {
                     let result = self.stack.pop().unwrap();
-                    self.frames.pop();
+                    let old_frame = self.frames.pop().unwrap();
                     if self.frames.len() == 0 {
                         self.stack.pop();
                         return Ok(());
                     }
-
+                    let old_stack_base = old_frame.stack_base;
+                    // drop all the callee's params/locals
+                    self.stack.drain(old_stack_base - 1..);
                     self.stack.push(result)
                 }
                 OpCode::OpPrint => {
@@ -291,6 +311,19 @@ impl<'mem> VM<'mem> {
                 (Value::String(a), Value::String(b)) => {
                     let str_a = self.heap.get_object_by_ptr(*a);
                     let str_b = self.heap.get_object_by_ptr(*b);
+                    match (str_a, str_b) {
+                        (Object::String(a), Object::String(b)) => {
+                            let new_str = a.clone() + b;
+                            let new_str_ptr = self.heap.add_object(Object::String(new_str));
+                            Value::String(new_str_ptr)
+                        }
+                        _ => return Err(InterpretError::InterpretRuntimeErr),
+                    }
+                }
+                (Value::Object(a), Value::String(b)) => {
+                    let str_a = self.heap.get_object_by_ptr(*a);
+                    let str_b = self.heap.get_object_by_ptr(*b);
+                    println!("a {:?} b {:?}", str_a, str_b);
                     match (str_a, str_b) {
                         (Object::String(a), Object::String(b)) => {
                             let new_str = a.clone() + b;
@@ -432,10 +465,14 @@ impl<'mem> VM<'mem> {
                 let function = fun.clone();
                 self.call(function, arg_count)?;
             } else {
-                // Err non-callable type
+                return Err(InterpretError::RuntimeErrorNonCallableType {
+                    ttype: callable.to_string(),
+                });
             }
         } else {
-            // Err non-callable type
+            return Err(InterpretError::RuntimeErrorNonCallableType {
+                ttype: callee.to_string(),
+            });
         }
         Ok(())
     }
@@ -466,6 +503,7 @@ impl<'mem> VM<'mem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::*;
 
     #[test]
     fn test_basic() {
@@ -496,6 +534,11 @@ mod tests {
             print a + b;
         }
         sum(1, 2);
+
+        fun gimme() {
+            return "5 bucks";
+        }
+        print "here is " + gimme() + "!";
         "#;
         vm.interpret(&input).unwrap();
     }
@@ -506,11 +549,15 @@ mod tests {
         let mut vm = VM::new(&mut mem);
 
         let input = r#"
-        fun sum(a, b) {
-            print a + b;
+        fun fib(n) {
+            if (n < 2) return n;
+            return fib(n - 2) + fib(n - 1);
         }
-        sum(1, 2);
+        print fib(30);
         "#;
+        let start = Instant::now();
         vm.interpret(&input).unwrap();
+        let end = Instant::now().checked_duration_since(start).unwrap();
+        println!("duration: {}", end.as_secs());
     }
 }
