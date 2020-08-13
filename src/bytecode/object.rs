@@ -1,6 +1,5 @@
 use crate::{chunk::Chunk, value::Value};
 use std::{
-    cell::RefCell,
     fmt::{Debug, Display},
     rc::Rc,
 };
@@ -40,28 +39,24 @@ impl Debug for Object {
 
 #[derive(Debug, Clone)]
 pub struct UpValueObj {
-    location: *const Value,
-    value: Rc<RefCell<Value>>,
+    pub location: *mut Value,
+    pub closed: Value,
 }
 
 impl UpValueObj {
-    pub fn new(location: *const Value, value: Value) -> UpValueObj {
+    pub fn new(location: *mut Value) -> UpValueObj {
         UpValueObj {
             location,
-            value: Rc::new(RefCell::new(value)),
+            closed: Value::Nil,
         }
     }
 
-    pub fn location(&self) -> *const Value {
+    pub fn location(&self) -> *mut Value {
         self.location
     }
 
     pub fn set_value(&mut self, value: Value) {
-        *self.value.borrow_mut() = value
-    }
-
-    pub fn value(&self) -> &Rc<RefCell<Value>> {
-        &self.value
+        self.closed = value
     }
 }
 

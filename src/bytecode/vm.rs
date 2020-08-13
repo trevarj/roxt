@@ -218,6 +218,7 @@ impl<'mem> VM<'mem> {
                         return Ok(());
                     }
                     let old_stack_base = old_frame.stack_base;
+                    self.close_upvalues(old_stack_base - 1);
                     // drop all the callee's params/locals
                     self.stack.drain(old_stack_base - 1..);
                     self.stack.push(result)
@@ -323,11 +324,11 @@ impl<'mem> VM<'mem> {
                                 for (index, is_loc) in upvalues {
                                     if is_loc {
                                         // capture upvalues
-                                        let value =
+                                        let mut value =
                                             self.stack[self.current_frame()?.stack_base + index];
                                         let mut local_upval: Option<UpValueObj> = None;
 
-                                        let val_ptr: *const Value = &value;
+                                        let val_ptr: *mut Value = &mut value;
 
                                         for u in &self.open_upvalues {
                                             if u.location() == val_ptr {
@@ -335,7 +336,7 @@ impl<'mem> VM<'mem> {
                                             }
                                         }
                                         if local_upval.is_none() {
-                                            let new_upval = UpValueObj::new(val_ptr, value);
+                                            let new_upval = UpValueObj::new(val_ptr);
                                             self.open_upvalues.push(new_upval.clone());
                                             upvals.push(new_upval)
                                         } else {
@@ -358,21 +359,35 @@ impl<'mem> VM<'mem> {
                 }
                 OpCode::OpGetUpValue(upv_ptr) => {
                     let upv = &self.current_frame()?.closure.upvalues[upv_ptr];
-                    let value = upv.value().borrow().clone();
-                    self.stack.push(value)
+                    let value = upv.location();
+                    unsafe { self.stack.push(*value) }
                 }
                 OpCode::OpSetUpValue(upv_ptr) => {
                     let stack_val = self.stack.last().unwrap().clone();
-                    self.current_frame_mut()?.closure.upvalues[upv_ptr].set_value(stack_val);
+                    let raw = self.current_frame_mut()?.closure.upvalues[upv_ptr].location();
+                    unsafe {
+                        *raw = stack_val;
+                    }
                 }
                 OpCode::OpCloseUpValue => {
-                    println!("open upvals {:?}", self.open_upvalues);
-                    // for uv in self.open_upvalues {
-
-                    // }
+                    self.close_upvalues(self.stack.len() - 1);
+                    self.stack.pop();
                 }
             };
             self.current_frame_mut()?.pc += 1;
+        }
+    }
+
+    fn close_upvalues(&mut self, last_idx: usize) {
+        let value: *mut Value = self.stack.get_mut(last_idx).unwrap();
+        for uv in self.open_upvalues.iter_mut() {
+            if uv.location() < value {
+                break;
+            }
+            unsafe {
+                uv.set_value(*uv.location().clone());
+                uv.location = &mut uv.closed;
+            }
         }
     }
 
