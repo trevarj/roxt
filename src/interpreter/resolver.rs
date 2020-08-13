@@ -28,7 +28,7 @@ impl Resolver {
 
     pub fn resolve(&mut self, program: &mut Program) -> Result<(), ResolverError> {
         Ok(for decl in program.declarations.iter_mut() {
-            self.resolve_declaration(decl);
+            self.resolve_declaration(decl)?;
         })
     }
 

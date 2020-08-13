@@ -1,12 +1,13 @@
-use super::chunk::{Chunk, OpCode};
-use super::value::Value;
+use crate::chunk::{Chunk, OpCode};
+use crate::value::Value;
 use crate::{
-    compiler::Compiler,
+    compiler::{Compiler, UpValue},
     memory::Memory,
-    object::{Function, FunctionType, Object},
+    object::{Closure, Function, FunctionType, Object, UpValueObj},
 };
 use std::{
     collections::HashMap,
+    rc::Rc,
     time::{SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
@@ -16,13 +17,14 @@ pub struct VM<'mem> {
     stack: Vec<Value>,
     heap: &'mem mut Memory,
     globals: HashMap<String, Value>,
+    open_upvalues: Vec<UpValueObj>,
 }
 
 #[derive(Debug)]
 struct CallFrame {
     pc: usize,
     stack_base: usize,
-    function: Function,
+    closure: Closure,
 }
 
 #[derive(Error, Debug)]
@@ -59,6 +61,7 @@ impl<'mem> VM<'mem> {
             stack: Vec::with_capacity(128),
             heap: memory,
             globals: HashMap::new(),
+            open_upvalues: Vec::with_capacity(128),
         }
     }
 
@@ -81,25 +84,27 @@ impl<'mem> VM<'mem> {
 
     pub fn interpret(&mut self, input: &str) -> Result<(), InterpretError> {
         let function = Function::new(
-            "main".to_string(),
+            "0_main".to_string(),
             FunctionType::Script,
             0,
-            Chunk::new("main".to_string()),
+            Chunk::new("0_main".to_string()),
         );
         self.define_native("clock".to_string(), Box::new(native_clock));
         let mut compiler = Compiler::new(input, self.heap, function);
 
         match compiler.compile() {
             Ok(fun) => {
-                println!("{}", fun.chunk());
-                let func_ptr = self.heap.add_object(Object::Function(fun));
+                fun.chunk().dump(&self.heap);
+                let func_ptr = self
+                    .heap
+                    .add_object(Object::Closure(Closure::new(Vec::new(), Rc::new(fun))));
                 self.stack.push(Value::Object(func_ptr));
                 self.call_value(Value::Object(func_ptr), 0)?;
                 if let Err(err) = self.run() {
                     eprintln!("Runtime error: {}", err);
                     for (count, cf) in self.frames.iter().enumerate() {
-                        let line = cf.function.chunk().get_line_by_idx(cf.pc);
-                        let func_name = cf.function.name();
+                        let line = cf.closure.function.chunk().get_line_by_idx(cf.pc);
+                        let func_name = cf.closure.function.name();
                         eprintln!("{:1$}{} {}():{}", "", count, func_name, line);
                     }
                     Ok(())
@@ -120,13 +125,13 @@ impl<'mem> VM<'mem> {
             // println!("stack: {:?}", self.stack);
             let op = if let Some(op) = self
                 .current_frame()?
+                .closure
                 .function
                 .chunk()
                 .code()
                 .get(self.current_frame()?.pc)
-                .copied()
             {
-                op
+                op.clone()
             } else {
                 // program done
                 return Ok(());
@@ -137,6 +142,7 @@ impl<'mem> VM<'mem> {
                 OpCode::OpConstant(const_idx) => {
                     let val = self
                         .current_frame()?
+                        .closure
                         .function
                         .chunk()
                         .get_constant(const_idx as usize);
@@ -158,6 +164,7 @@ impl<'mem> VM<'mem> {
                 | OpCode::OpEqual => self.binary_op(
                     &op,
                     self.current_frame()?
+                        .closure
                         .function
                         .chunk()
                         .get_line_by_idx(self.current_frame()?.pc),
@@ -176,6 +183,7 @@ impl<'mem> VM<'mem> {
                         return Err(InterpretError::RuntimeErrorInvalidOperandNegation {
                             line: self
                                 .current_frame()?
+                                .closure
                                 .function
                                 .chunk()
                                 .get_line_by_idx(self.current_frame()?.pc),
@@ -194,6 +202,7 @@ impl<'mem> VM<'mem> {
                         return Err(InterpretError::RuntimeErrorInvalidOperandNot {
                             line: self
                                 .current_frame()?
+                                .closure
                                 .function
                                 .chunk()
                                 .get_line_by_idx(self.current_frame()?.pc),
@@ -217,6 +226,10 @@ impl<'mem> VM<'mem> {
                     if let Some(val) = self.stack.pop() {
                         match val {
                             Value::String(ptr) => {
+                                let str = self.heap.get_object_by_ptr(ptr);
+                                println!("{}", str)
+                            }
+                            Value::Object(ptr) => {
                                 let str = self.heap.get_object_by_ptr(ptr);
                                 println!("{}", str)
                             }
@@ -295,6 +308,69 @@ impl<'mem> VM<'mem> {
                     self.call_value(callee, arg_count)?;
                     continue;
                 }
+                OpCode::OpClosure(fun_ptr, upvalues) => {
+                    let function = self
+                        .current_frame()?
+                        .closure
+                        .function
+                        .chunk()
+                        .get_constant(fun_ptr);
+                    if let Value::Object(fun_ptr) = function {
+                        let fun = self.heap.get_object_by_ptr(fun_ptr);
+                        match fun {
+                            Object::Function(fun) => {
+                                let mut upvals: Vec<UpValueObj> = Vec::new();
+                                for (index, is_loc) in upvalues {
+                                    if is_loc {
+                                        // capture upvalues
+                                        let value =
+                                            self.stack[self.current_frame()?.stack_base + index];
+                                        let mut local_upval: Option<UpValueObj> = None;
+
+                                        let val_ptr: *const Value = &value;
+
+                                        for u in &self.open_upvalues {
+                                            if u.location() == val_ptr {
+                                                local_upval = Some(u.clone());
+                                            }
+                                        }
+                                        if local_upval.is_none() {
+                                            let new_upval = UpValueObj::new(val_ptr, value);
+                                            self.open_upvalues.push(new_upval.clone());
+                                            upvals.push(new_upval)
+                                        } else {
+                                            upvals.push(local_upval.unwrap())
+                                        }
+                                    } else {
+                                        let upval = &self.current_frame()?.closure.upvalues[index];
+                                        upvals.push(upval.clone());
+                                    }
+                                }
+                                let fun_ptr = fun.clone();
+                                let closure_ptr = self
+                                    .heap
+                                    .add_object(Object::Closure(Closure::new(upvals, fun_ptr)));
+                                self.stack.push(Value::Object(closure_ptr));
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+                OpCode::OpGetUpValue(upv_ptr) => {
+                    let upv = &self.current_frame()?.closure.upvalues[upv_ptr];
+                    let value = upv.value().borrow().clone();
+                    self.stack.push(value)
+                }
+                OpCode::OpSetUpValue(upv_ptr) => {
+                    let stack_val = self.stack.last().unwrap().clone();
+                    self.current_frame_mut()?.closure.upvalues[upv_ptr].set_value(stack_val);
+                }
+                OpCode::OpCloseUpValue => {
+                    println!("open upvals {:?}", self.open_upvalues);
+                    // for uv in self.open_upvalues {
+
+                    // }
+                }
             };
             self.current_frame_mut()?.pc += 1;
         }
@@ -340,7 +416,7 @@ impl<'mem> VM<'mem> {
                     return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
                         lhs: a.to_string(),
                         rhs: b.to_string(),
-                        op: *op,
+                        op: op.clone(),
                         line,
                     })
                 }
@@ -351,7 +427,7 @@ impl<'mem> VM<'mem> {
                     return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
                         lhs: a.to_string(),
                         rhs: b.to_string(),
-                        op: *op,
+                        op: op.clone(),
                         line,
                     })
                 }
@@ -362,7 +438,7 @@ impl<'mem> VM<'mem> {
                     return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
                         lhs: a.to_string(),
                         rhs: b.to_string(),
-                        op: *op,
+                        op: op.clone(),
                         line,
                     })
                 }
@@ -373,7 +449,7 @@ impl<'mem> VM<'mem> {
                     return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
                         lhs: a.to_string(),
                         rhs: b.to_string(),
-                        op: *op,
+                        op: op.clone(),
                         line,
                     })
                 }
@@ -384,7 +460,7 @@ impl<'mem> VM<'mem> {
                     return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
                         lhs: a.to_string(),
                         rhs: b.to_string(),
-                        op: *op,
+                        op: op.clone(),
                         line,
                     })
                 }
@@ -395,7 +471,7 @@ impl<'mem> VM<'mem> {
                     return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
                         lhs: a.to_string(),
                         rhs: b.to_string(),
-                        op: *op,
+                        op: op.clone(),
                         line,
                     })
                 }
@@ -406,7 +482,7 @@ impl<'mem> VM<'mem> {
                     return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
                         lhs: a.to_string(),
                         rhs: b.to_string(),
-                        op: *op,
+                        op: op.clone(),
                         line,
                     })
                 }
@@ -417,7 +493,7 @@ impl<'mem> VM<'mem> {
                     return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
                         lhs: a.to_string(),
                         rhs: b.to_string(),
-                        op: *op,
+                        op: op.clone(),
                         line,
                     })
                 }
@@ -448,7 +524,7 @@ impl<'mem> VM<'mem> {
                 return Err(InterpretError::RuntimeErrorUnsupportBinaryOperation {
                     lhs: a.to_string(),
                     rhs: b.to_string(),
-                    op: *op,
+                    op: op.clone(),
                     line,
                 })
             }
@@ -462,10 +538,10 @@ impl<'mem> VM<'mem> {
             let callable = self.heap.get_object_by_ptr(ptr);
             // println!("heap {:?}", self.heap);
             match callable {
-                Object::Function(fun) => {
-                    // call function
-                    let function = fun.clone();
-                    self.call(function, arg_count)?;
+                Object::Closure(clo) => {
+                    let upvalues = clo.upvalues.clone();
+                    let function = clo.function.clone();
+                    self.call(function, upvalues, arg_count)?;
                 }
                 Object::Native(fun) => {
                     let args: Vec<Value> =
@@ -489,7 +565,12 @@ impl<'mem> VM<'mem> {
         Ok(())
     }
 
-    fn call(&mut self, function: Function, arg_count: usize) -> Result<(), InterpretError> {
+    fn call(
+        &mut self,
+        function: Rc<Function>,
+        upvalues: Vec<UpValueObj>,
+        arg_count: usize,
+    ) -> Result<(), InterpretError> {
         if arg_count != function.arity() {
             return Err(InterpretError::RuntimeErrorFunctionArity {
                 ident: function.name().to_string(),
@@ -503,7 +584,7 @@ impl<'mem> VM<'mem> {
 
         // create new callframe
         self.frames.push(CallFrame {
-            function,
+            closure: Closure::new(upvalues, function),
             pc: 0,
             stack_base: self.stack.len() - arg_count,
         });
@@ -588,5 +669,118 @@ mod tests {
         vm.interpret(&input).unwrap();
         let end = Instant::now().checked_duration_since(start).unwrap();
         println!("duration: {}", end.as_secs());
+    }
+
+    #[test]
+    fn test_closure() {
+        let mut mem = Memory::new();
+        let mut vm = VM::new(&mut mem);
+
+        let input = r#"
+        // should print 'outer'
+        var x = "global";
+        fun outer() {
+            var x = "outer";
+            fun inner() {
+                print x;
+            }
+            inner();
+        }
+        outer();
+        "#;
+        vm.interpret(&input).unwrap();
+    }
+
+    #[test]
+    fn test_upvalues() {
+        let mut mem = Memory::new();
+        let mut vm = VM::new(&mut mem);
+
+        let input = r#"
+        fun outer() {
+            var x = "value";
+            fun middle() {
+                fun inner() {
+                    print x;
+                }
+        
+                print "create inner closure";
+                return inner;
+            }
+        
+            print "return from outer";
+            return middle;
+        }
+        
+        var mid = outer();
+        var in = mid();
+        in();
+        
+        // expected: 
+        // return from outer
+        // create inner closure
+        // value
+        
+        "#;
+        vm.interpret(&input).unwrap();
+    }
+
+    #[test]
+    fn test_closed_over_variable() {
+        let mut mem = Memory::new();
+        let mut vm = VM::new(&mut mem);
+
+        let input = r#"
+        var globalSet;
+        var globalGet;
+        
+        fun main() {
+          var a = "initial";
+        
+          fun set(val) { a = val; }
+          fun get() { print a; }
+          
+          globalSet = set;
+          globalGet = get;
+        }
+        
+        main();
+        globalSet("first update");
+        globalGet();
+        globalSet("2nd update");
+        globalGet();
+        
+        "#;
+        vm.interpret(&input).unwrap();
+    }
+
+    #[test]
+    fn test_closed_over_loop() {
+        let mut mem = Memory::new();
+        let mut vm = VM::new(&mut mem);
+
+        let input = r#"
+        var globalOne;
+        var globalTwo;
+
+        fun main() {
+        for (var a = 1; a <= 2; a = a + 1) {
+            fun closure() {
+                print a;
+            }
+            if (globalOne == nil) {
+                globalOne = closure;
+            } else {
+                globalTwo = closure;
+            }
+        }   
+        }
+
+        main();
+        globalOne();
+        globalTwo();
+        
+        "#;
+        vm.interpret(&input).unwrap();
     }
 }

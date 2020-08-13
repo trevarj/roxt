@@ -9,7 +9,6 @@ use vm::{InterpretError, VM};
 
 pub mod chunk;
 pub mod compiler;
-pub mod debug;
 pub mod lexer;
 pub mod memory;
 pub mod object;

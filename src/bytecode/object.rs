@@ -1,9 +1,16 @@
 use crate::{chunk::Chunk, value::Value};
-use std::fmt::{Debug, Display};
+use std::{
+    cell::RefCell,
+    fmt::{Debug, Display},
+    rc::Rc,
+};
 
+// #[derive(Clone)]
 pub enum Object {
     String(String),
-    Function(Function),
+    UpValue(UpValueObj),
+    Function(Rc<Function>),
+    Closure(Closure),
     Native(Box<dyn Fn(usize, Vec<Value>) -> Value>),
 }
 
@@ -12,7 +19,9 @@ impl Display for Object {
         match self {
             Object::String(s) => write!(f, "{}", s),
             Object::Function(fun) => write!(f, "{}", fun),
+            Object::Closure(clo) => write!(f, "{}", clo),
             Object::Native(_) => write!(f, "<native fn>"),
+            Object::UpValue(_) => write!(f, "<upvalue>"),
         }
     }
 }
@@ -22,8 +31,55 @@ impl Debug for Object {
         match self {
             Object::String(s) => std::fmt::Debug::fmt(s, f),
             Object::Function(fun) => std::fmt::Debug::fmt(fun, f),
+            Object::Closure(clo) => std::fmt::Debug::fmt(clo, f),
             Object::Native(_) => write!(f, "<native fn>"),
+            Object::UpValue(_) => write!(f, "<upvalue>"),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UpValueObj {
+    location: *const Value,
+    value: Rc<RefCell<Value>>,
+}
+
+impl UpValueObj {
+    pub fn new(location: *const Value, value: Value) -> UpValueObj {
+        UpValueObj {
+            location,
+            value: Rc::new(RefCell::new(value)),
+        }
+    }
+
+    pub fn location(&self) -> *const Value {
+        self.location
+    }
+
+    pub fn set_value(&mut self, value: Value) {
+        *self.value.borrow_mut() = value
+    }
+
+    pub fn value(&self) -> &Rc<RefCell<Value>> {
+        &self.value
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Closure {
+    pub upvalues: Vec<UpValueObj>,
+    pub function: Rc<Function>,
+}
+
+impl Closure {
+    pub fn new(upvalues: Vec<UpValueObj>, function: Rc<Function>) -> Closure {
+        Closure { upvalues, function }
+    }
+}
+
+impl Display for Closure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "<closure: fn:{}>", self.function.name())
     }
 }
 

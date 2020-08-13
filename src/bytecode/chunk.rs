@@ -1,7 +1,11 @@
-use crate::value::Value;
-use std::fmt::Display;
+use crate::{
+    compiler::UpValue,
+    memory::Memory,
+    object::{Function, Object},
+    value::Value,
+};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum OpCode {
     OpConstant(u16),
     OpBool(bool),
@@ -25,10 +29,14 @@ pub enum OpCode {
     OpSetGlobal(usize),
     OpGetLocal(usize),
     OpSetLocal(usize),
+    OpGetUpValue(usize),
+    OpSetUpValue(usize),
+    OpCloseUpValue,
     OpJumpIfFalse(usize),
     OpJump(usize),
     OpLoop(usize),
     OpCall(usize),
+    OpClosure(usize, Vec<UpValue>),
     OpReturn,
 }
 
@@ -39,142 +47,6 @@ pub struct Chunk {
     code: Vec<OpCode>,
     constants: Vec<Value>,
     lines: Vec<usize>,
-}
-
-impl Display for Chunk {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "==== {} ====", self.name)?;
-        for (op, line) in self.code.iter().zip(&self.lines) {
-            match op {
-                OpCode::OpConstant(const_idx) => {
-                    // constant values known at compile time, safe to unwrap.
-                    writeln!(
-                        f,
-                        "{:<4} line:{:<4} {:<10} val:{}",
-                        const_idx,
-                        line,
-                        "OP_CONSTANT",
-                        self.constants.get(*const_idx as usize).unwrap()
-                    )?
-                }
-                OpCode::OpBool(b) => {
-                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", b, line, "OP_BOOL", "")?
-                }
-                OpCode::OpNil => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    "nil", line, "OP_NIL", ""
-                )?,
-                OpCode::OpAdd => {
-                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_ADD", "")?
-                }
-                OpCode::OpSubtract => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    "", line, "OP_SUBTRACT", ""
-                )?,
-                OpCode::OpMultiply => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    "", line, "OP_MULTIPLY", ""
-                )?,
-                OpCode::OpDivide => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    "", line, "OP_DIVIDE", ""
-                )?,
-                OpCode::OpNegate => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    "", line, "OP_NEGATE", ""
-                )?,
-                OpCode::OpLess => {
-                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_LT", "")?
-                }
-                OpCode::OpLessEqual => {
-                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_LTEQ", "")?
-                }
-                OpCode::OpGreater => {
-                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_GT", "")?
-                }
-                OpCode::OpGreatEqual => {
-                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_GTEQ", "")?
-                }
-                OpCode::OpEqual => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    "", line, "OP_EQUAL", ""
-                )?,
-                OpCode::OpNotEqual => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    "", line, "OP_NOTEQ", ""
-                )?,
-                OpCode::OpReturn => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    "", line, "OP_RETURN", ""
-                )?,
-                OpCode::OpNot => {
-                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_NOT", "")?
-                }
-                OpCode::OpPrint => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    "", line, "OP_PRINT", ""
-                )?,
-                OpCode::OpPop => {
-                    writeln!(f, "{:<4} line:{:<4} {:<10} {:^10}", "", line, "OP_POP", "")?
-                }
-                OpCode::OpDefineGlobal(var_ident_ptr) => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    var_ident_ptr, line, "OP_DEFINE_GLOBAL", ""
-                )?,
-                OpCode::OpGetGlobal(var_ident_ptr) => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    var_ident_ptr, line, "OP_GET_GLOBAL", ""
-                )?,
-                OpCode::OpSetGlobal(var_ident_ptr) => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    var_ident_ptr, line, "OP_SET_GLOBAL", ""
-                )?,
-                OpCode::OpGetLocal(stack_ptr) => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    stack_ptr, line, "OP_GET_LOCAL", ""
-                )?,
-                OpCode::OpSetLocal(stack_ptr) => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    stack_ptr, line, "OP_SET_LOCAL", ""
-                )?,
-                OpCode::OpJumpIfFalse(offset) => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    offset, line, "OP_JMP_IF_FALSE", ""
-                )?,
-                OpCode::OpJump(offset) => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    offset, line, "OP_JMP", ""
-                )?,
-                OpCode::OpLoop(offset) => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    offset, line, "OP_LOOP", ""
-                )?,
-                OpCode::OpCall(arg_count) => writeln!(
-                    f,
-                    "{:<4} line:{:<4} {:<10} {:^10}",
-                    arg_count, line, "OP_CALL", ""
-                )?,
-            }
-        }
-        Ok(())
-    }
 }
 
 impl Chunk {
@@ -221,6 +93,133 @@ impl Chunk {
     pub fn get_constant(&self, const_idx: usize) -> Value {
         *self.constants.get(const_idx).unwrap()
     }
+
+    pub fn dump(&self, memory: &Memory) {
+        println!("line {:=<16}[{}]{:=>16}", "", self.name, "");
+        let mut functions: Vec<&Function> = Vec::new();
+        for (op, line) in self.code.iter().zip(&self.lines) {
+            match op {
+                OpCode::OpConstant(const_idx) => {
+                    // constant values known at compile time, safe to unwrap.
+                    let constant = self.constants.get(*const_idx as usize).unwrap();
+                    let mut const_str = constant.to_string();
+                    if let Value::String(idx) = constant {
+                        const_str = memory.get_object_by_ptr(*idx).to_string();
+                    }
+                    println!(
+                        "{:<4} {:<20} {:<4} {}",
+                        line, "OP_CONSTANT", const_idx, const_str
+                    )
+                }
+                OpCode::OpBool(b) => println!("{:<4} {:<20} {:<4} {:<10}", line, b, "OP_BOOL", ""),
+                OpCode::OpNil => println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_NIL", "nil", ""),
+                OpCode::OpAdd => println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_ADD", "", ""),
+                OpCode::OpSubtract => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_SUBTRACT", "", "")
+                }
+                OpCode::OpMultiply => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_MULTIPLY", "", "")
+                }
+                OpCode::OpDivide => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_DIVIDE", "", "")
+                }
+                OpCode::OpNegate => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_NEGATE", "", "")
+                }
+                OpCode::OpLess => println!("{:<4}{:<20} {:<4}  {:<10}", line, "OP_LESS", "", ""),
+                OpCode::OpLessEqual => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_LESSEQ", "", "")
+                }
+                OpCode::OpGreater => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_GREATER", "", "")
+                }
+                OpCode::OpGreatEqual => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_GREATEREQ", "", "")
+                }
+                OpCode::OpEqual => println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_EQUAL", "", ""),
+                OpCode::OpNotEqual => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_NOTEQUAL", "", "")
+                }
+                OpCode::OpReturn => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_RETURN", "", "")
+                }
+                OpCode::OpNot => println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_NOT", "", ""),
+                OpCode::OpPrint => println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_PRINT", "", ""),
+                OpCode::OpPop => println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_POP", "", ""),
+                OpCode::OpDefineGlobal(var_ident_ptr) => println!(
+                    "{:<4} {:<20} {:<4} {:>10}",
+                    line,
+                    "OP_DEFINE_GLOBAL",
+                    var_ident_ptr,
+                    memory.get_object_by_ptr(*var_ident_ptr)
+                ),
+                OpCode::OpGetGlobal(var_ident_ptr) => println!(
+                    "{:<4} {:<20} {:<4} {:>10}",
+                    line,
+                    "OP_GET_GLOBAL",
+                    var_ident_ptr,
+                    memory.get_object_by_ptr(*var_ident_ptr)
+                ),
+                OpCode::OpSetGlobal(var_ident_ptr) => println!(
+                    "{:<4} {:<20} {:<4} {:<10}",
+                    line,
+                    "OP_SET_GLOBAL",
+                    var_ident_ptr,
+                    memory.get_object_by_ptr(*var_ident_ptr)
+                ),
+                OpCode::OpGetLocal(stack_ptr) => println!(
+                    "{:<4} {:<20} {:<4} {:<10}",
+                    line, "OP_GET_LOCAL", stack_ptr, ""
+                ),
+                OpCode::OpSetLocal(stack_ptr) => println!(
+                    "{:<4} {:<20} {:<4} {:<10}",
+                    line, "OP_SET_LOCAL", stack_ptr, ""
+                ),
+                OpCode::OpJumpIfFalse(offset) => println!(
+                    "{:<4} {:<20} {:<4} {:<10}",
+                    line, "OP_JUMP_FALSE", offset, ""
+                ),
+                OpCode::OpJump(offset) => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_JUMP", offset, "")
+                }
+                OpCode::OpLoop(offset) => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_LOOP", offset, "")
+                }
+                OpCode::OpCall(arg_count) => {
+                    println!("{:<4} {:<20} {:<4} {:<10}", line, "OP_CALL", arg_count, "")
+                }
+                OpCode::OpClosure(fun_ptr, upvalues) => {
+                    let fun_val = self.get_constant(*fun_ptr);
+                    if let Value::Object(idx) = fun_val {
+                        let function = memory.get_object_by_ptr(idx);
+                        if let Object::Function(fun) = function {
+                            functions.push(&fun);
+                            println!(
+                                "{:<4} {:<20} {:<4} {:<?}",
+                                line, "OP_CLOSURE", fun_ptr, upvalues,
+                            )
+                        }
+                    }
+                }
+                OpCode::OpGetUpValue(upval_ptr) => println!(
+                    "{:<4} {:<20} {:<4} {:<10}",
+                    line, "OP_GET_UPVALUE", upval_ptr, ""
+                ),
+                OpCode::OpSetUpValue(upval_ptr) => println!(
+                    "{:<4} {:<20} {:<4} {:<10}",
+                    line, "OP_SET_UPVALUE", upval_ptr, ""
+                ),
+                OpCode::OpCloseUpValue => println!(
+                    "{:<4} {:<20} {:<4} {:<10}",
+                    line, "OP_CLOSE_UPVALUE", "", ""
+                ),
+            }
+        }
+
+        for f in functions {
+            f.chunk().dump(memory)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -235,7 +234,6 @@ mod tests {
         c.write(OpCode::OpConstant(idx as u16), 123);
         let idx = c.add_constant(Value::Number(55.5));
         c.write(OpCode::OpConstant(idx as u16), 123);
-        println!("{}", c.to_string());
     }
 
     #[test]

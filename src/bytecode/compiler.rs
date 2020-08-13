@@ -5,6 +5,8 @@ use crate::{
     object::{Function, FunctionType, Object},
     value::Value,
 };
+use std::convert::TryInto;
+use std::rc::Rc;
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone)]
@@ -31,6 +33,8 @@ pub enum CompilerError {
     ParserVariableInsideOwnInitializer { found: String, line: usize },
     #[error("Cannot return from top level of script, line {line:?}.")]
     ParserReturnFromTopLevel { line: usize },
+    #[error("Max upvalues for function {function}")]
+    ChunkMaxUpvalues { function: String },
 }
 pub struct Compiler<'input> {
     /// The Lexer used to tokenize the source
@@ -44,13 +48,20 @@ pub struct Compiler<'input> {
     state: CompilerState,
 }
 
+/// (index into locals, is local)
+pub type UpValue = (usize, bool);
+/// (Lexeme, depth, is captured) - depth is None when variable is declared but not defined (initialized)
+type Local = (String, Option<usize>, bool);
 #[derive(Debug)]
 struct CompilerState {
+    /// Some if compiler is in enclosing function
+    enclosing: Option<Box<CompilerState>>,
     /// Current function that is being compiled
     function: Function,
     /// Local variable scopes, vec of variable lexemes and their depths.
-    /// Is None when variable is declared but not defined (initialized)
-    locals: Vec<(String, Option<usize>)>,
+    locals: Vec<Local>,
+    /// Upvalues
+    upvalues: Vec<UpValue>,
     /// Current scope depth
     scope_depth: usize,
 }
@@ -58,10 +69,45 @@ struct CompilerState {
 impl CompilerState {
     fn new(function: Function) -> CompilerState {
         CompilerState {
+            enclosing: None,
             function,
             locals: Vec::new(),
+            upvalues: Vec::new(),
             scope_depth: 0,
         }
+    }
+
+    fn set_enclosing(&mut self, enclosing: Option<Box<CompilerState>>) {
+        self.enclosing = enclosing
+    }
+
+    fn resolve_upvalue(&mut self, ident: &String) -> Result<Option<usize>, CompilerError> {
+        match &mut self.enclosing {
+            Some(enclosing) => {
+                if let Some(index) = local_search(&enclosing.locals, ident, 0)? {
+                    // FOUND so set to captured and add upvalue
+                    enclosing.locals[index].2 = true;
+                    Ok(Some(self.add_upvalue(index, true)?))
+                } else {
+                    if let Some(upvalue) = enclosing.resolve_upvalue(ident)? {
+                        Ok(Some(self.add_upvalue(upvalue, false)?))
+                    } else {
+                        Ok(None)
+                    }
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn add_upvalue(&mut self, index: usize, is_local: bool) -> Result<usize, CompilerError> {
+        for (idx, (uv_idx, uv_is_local)) in self.upvalues.iter().copied().enumerate() {
+            if idx == uv_idx && uv_is_local == is_local {
+                return Ok(idx);
+            }
+        }
+        self.upvalues.push((index, is_local));
+        Ok(self.upvalues.len() - 1)
     }
 }
 
@@ -93,12 +139,18 @@ impl<'input> Compiler<'input> {
         self.current_chunk().write(op, line);
     }
 
-    /// Emits a constant value into the current chunk's constant vec
-    fn emit_constant(&mut self, value: Value, line: usize) -> Result<(), CompilerError> {
+    // Makes a constant in the current chunk
+    fn make_constant(&mut self, value: Value, line: usize) -> Result<usize, CompilerError> {
         let idx = self.current_chunk().add_constant(value);
         if idx > u16::MAX as usize {
             return Err(CompilerError::ChunkMaxConstants);
         }
+        Ok(idx as usize)
+    }
+
+    /// Emits a constant value into the current chunk's constant vec
+    fn emit_constant(&mut self, value: Value, line: usize) -> Result<(), CompilerError> {
+        let idx = self.make_constant(value, line)?;
         self.emit_opcode(OpCode::OpConstant(idx as u16), line);
         Ok(())
     }
@@ -200,12 +252,16 @@ impl<'input> Compiler<'input> {
     fn end_scope(&mut self) {
         self.state.scope_depth -= 1;
         // clean out the locals from ending scope
-        while let Some((_, Some(depth))) = self.state.locals.last() {
+        while let Some((_, Some(depth), is_captured)) = self.state.locals.last() {
             if depth <= &self.state.scope_depth {
                 break;
             }
+            if *is_captured {
+                self.emit_opcode(OpCode::OpCloseUpValue, 0)
+            } else {
+                self.emit_opcode(OpCode::OpPop, 0);
+            }
             self.state.locals.pop();
-            self.emit_opcode(OpCode::OpPop, 0);
         }
     }
 
@@ -280,7 +336,7 @@ impl<'input> Compiler<'input> {
             self.emit_ident_const(&var_ident)?
         } else {
             // check if variable is already defined locally
-            for (ident, depth) in self.state.locals.iter().rev() {
+            for (ident, depth, is_captured) in self.state.locals.iter().rev() {
                 if depth.unwrap() < self.state.scope_depth {
                     break;
                 }
@@ -291,7 +347,7 @@ impl<'input> Compiler<'input> {
                     });
                 }
             }
-            self.state.locals.push((var_ident, None));
+            self.state.locals.push((var_ident, None, false));
             self.state.locals.len() - 1
         };
 
@@ -327,7 +383,7 @@ impl<'input> Compiler<'input> {
             self.emit_ident_const(&fun_ident)?
         } else {
             // check if variable is already defined locally
-            for (ident, depth) in self.state.locals.iter().rev() {
+            for (ident, depth, is_captured) in self.state.locals.iter().rev() {
                 if depth.unwrap() < self.state.scope_depth {
                     break;
                 }
@@ -341,7 +397,7 @@ impl<'input> Compiler<'input> {
             // give it a depth so that we can use it inside the function body
             self.state
                 .locals
-                .push((fun_ident.clone(), Some(self.state.scope_depth)));
+                .push((fun_ident.clone(), Some(self.state.scope_depth), false));
             self.state.locals.len() - 1
         };
 
@@ -368,7 +424,7 @@ impl<'input> Compiler<'input> {
         // create a new function (the one we're about to compile)
         let new_function = Function::new(
             fun_ident.clone(),
-            FunctionType::Function,
+            function_type,
             0,
             Chunk::new(fun_ident.clone()),
         );
@@ -376,6 +432,8 @@ impl<'input> Compiler<'input> {
         let mut temp_state = CompilerState::new(new_function);
         // swap to the new state
         std::mem::swap(&mut self.state, &mut temp_state);
+        // set the enclosing state...upvalue shit
+        self.state.set_enclosing(Some(Box::new(temp_state)));
         self.begin_scope();
 
         // compile the function
@@ -385,7 +443,7 @@ impl<'input> Compiler<'input> {
             self.state.function.inc_arity();
             let param = self.expect(TokenType::Identifier)?;
             let param_ident = param.lexeme().to_string();
-            self.state.locals.push((param_ident, Some(0)));
+            self.state.locals.push((param_ident, Some(0), false));
             if self.peek()?.ttype() != TokenType::Comma {
                 break;
             } else {
@@ -397,20 +455,25 @@ impl<'input> Compiler<'input> {
         // function body
         let line = self.expect(TokenType::LeftBrace)?.line();
         self.block_stmt()?;
+        self.end_scope();
         self.expect(TokenType::RightBrace)?;
 
         // return from the function
         self.emit_return(line);
 
-        // let compiled_function = std::mem::take(&mut self.state.function);
         let compiled_function = self.state.function.clone();
+        let upvals = self.state.upvalues.clone();
         // restore state
-        self.set_state(temp_state);
+        let old_state = std::mem::take(&mut self.state.enclosing).unwrap();
+        self.set_state(*old_state);
 
         // store function on the heap
-        let fun_ptr = self.memory.add_object(Object::Function(compiled_function));
-        self.emit_constant(Value::Object(fun_ptr), line)?;
+        let fun_ptr = self
+            .memory
+            .add_object(Object::Function(Rc::new(compiled_function)));
+        let const_ptr = self.make_constant(Value::Object(fun_ptr), line)?;
 
+        self.emit_opcode(OpCode::OpClosure(const_ptr, upvals), line);
         Ok(())
     }
 
@@ -873,12 +936,18 @@ impl<'input> Compiler<'input> {
         let var_ident = token.lexeme().to_string();
         let line = token.line();
 
-        let (get_op, set_op) = if let Some(index) = self.resolve_local(&var_ident)? {
-            (OpCode::OpGetLocal(index), OpCode::OpSetLocal(index))
-        } else {
-            // emit global variable identifier string, so it can be found during runtime
-            let index = self.emit_ident_const(&var_ident)?;
-            (OpCode::OpGetGlobal(index), OpCode::OpSetGlobal(index))
+        let (get_op, set_op) = {
+            if let Some(index) = self.resolve_local(&var_ident)? {
+                (OpCode::OpGetLocal(index), OpCode::OpSetLocal(index))
+            } else {
+                if let Some(index) = self.resolve_upvalue(&var_ident)? {
+                    (OpCode::OpGetUpValue(index), OpCode::OpSetUpValue(index))
+                } else {
+                    // emit global variable identifier string, so it can be found during runtime
+                    let index = self.emit_ident_const(&var_ident)?;
+                    (OpCode::OpGetGlobal(index), OpCode::OpSetGlobal(index))
+                }
+            }
         };
 
         if self.peek()?.ttype() == TokenType::Equal {
@@ -893,19 +962,39 @@ impl<'input> Compiler<'input> {
 
     /// Resolves local variable index. Returns None if not found
     fn resolve_local(&mut self, ident: &String) -> Result<Option<usize>, CompilerError> {
-        for (idx, (l_ident, depth)) in self.state.locals.iter().enumerate().rev() {
-            if depth.is_none() {
-                return Err(CompilerError::ParserVariableInsideOwnInitializer {
-                    found: l_ident.clone(),
-                    line: self.peek()?.line(),
-                });
-            }
-            if l_ident == ident {
-                return Ok(Some(idx));
-            }
-        }
-        Ok(None)
+        let line = self.peek()?.line();
+        let locals = &self.state.locals;
+        local_search(locals, ident, line)
     }
+
+    fn resolve_upvalue(&mut self, ident: &String) -> Result<Option<usize>, CompilerError> {
+        let line = self.peek()?.line();
+        self.state.resolve_upvalue(ident)
+        // if let Some(enclosing) = &mut self.state.enclosing {
+        //     Ok(enclosing.resolve_upvalue(ident)?)
+        // } else {
+        //     Ok(None)
+        // }
+    }
+}
+
+fn local_search(
+    locals: &[(String, Option<usize>, bool)],
+    ident: &String,
+    line: usize,
+) -> Result<Option<usize>, CompilerError> {
+    for (idx, (l_ident, depth, is_captured)) in locals.iter().enumerate().rev() {
+        if depth.is_none() {
+            return Err(CompilerError::ParserVariableInsideOwnInitializer {
+                found: l_ident.clone(),
+                line,
+            });
+        }
+        if l_ident == ident {
+            return Ok(Some(idx));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
