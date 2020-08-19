@@ -1,6 +1,6 @@
 # A Lox interpreter/bytecode compiler written in Rust.
 
-Pitiful attempt at a Lox interpreter - [Crafting Interpreters](https://craftinginterpreters.com)
+Quick attempt at a Lox interpreter - [Crafting Interpreters](https://craftinginterpreters.com)
 
 The coolest thing about this is the Pratt parsing. Otherwise, it's a good example of how *not* to implement an interpreter in Rust.
 
