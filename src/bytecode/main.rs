@@ -24,7 +24,7 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Args = argh::from_env();
-    println!("{:?}", args);
+    // println!("{:?}", args);
 
     // get memory unit
     let mut mem = Memory::new();
