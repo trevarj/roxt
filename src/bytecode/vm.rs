@@ -3,7 +3,7 @@ use crate::value::Value;
 use crate::{
     compiler::{Compiler, UpValue},
     memory::Memory,
-    object::{Closure, Function, FunctionType, Object, UpValueObj},
+    object::{Closure, ClassObj, Function, FunctionType, Object, UpValueObj},
 };
 use std::{
     collections::HashMap,
@@ -372,6 +372,14 @@ impl<'mem> VM<'mem> {
                 OpCode::OpCloseUpValue => {
                     self.close_upvalues(self.stack.len() - 1);
                     self.stack.pop();
+                }
+                OpCode::OpClass(class_ident_ptr) => {
+                    let class_ident_obj = self.heap.get_object_by_ptr(class_ident_ptr);
+                    if let Object::String(class_ident) = class_ident_obj {
+                        let class_ident = class_ident.clone();
+                        let class_obj_ptr = self.heap.add_object(Object::Class(ClassObj::new(class_ident)));
+                        self.stack.push(Value::Object(class_obj_ptr))
+                    }
                 }
             };
             self.current_frame_mut()?.pc += 1;
@@ -795,6 +803,18 @@ mod tests {
         globalOne();
         globalTwo();
         
+        "#;
+        vm.interpret(&input).unwrap();
+    }
+
+    #[test]
+    fn test_class() {
+        let mut mem = Memory::new();
+        let mut vm = VM::new(&mut mem);
+
+        let input = r#"
+        class MyClass {}
+        print MyClass;
         "#;
         vm.interpret(&input).unwrap();
     }

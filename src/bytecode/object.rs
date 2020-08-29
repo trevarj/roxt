@@ -1,13 +1,14 @@
 use crate::{chunk::Chunk, value::Value};
 use std::{
     fmt::{Debug, Display},
-    rc::Rc,
+    rc::Rc, collections::HashMap,
 };
 
 // #[derive(Clone)]
 pub enum Object {
     String(String),
     UpValue(UpValueObj),
+    Class(ClassObj),
     Function(Rc<Function>),
     Closure(Closure),
     Native(Box<dyn Fn(usize, Vec<Value>) -> Value>),
@@ -21,6 +22,7 @@ impl Display for Object {
             Object::Closure(clo) => write!(f, "{}", clo),
             Object::Native(_) => write!(f, "<native fn>"),
             Object::UpValue(_) => write!(f, "<upvalue>"),
+            Object::Class(class) => write!(f, "{}", class),
         }
     }
 }
@@ -32,7 +34,43 @@ impl Debug for Object {
             Object::Function(fun) => std::fmt::Debug::fmt(fun, f),
             Object::Closure(clo) => std::fmt::Debug::fmt(clo, f),
             Object::Native(_) => write!(f, "<native fn>"),
-            Object::UpValue(_) => write!(f, "<upvalue>"),
+            Object::UpValue(upval) => std::fmt::Debug::fmt(upval, f),
+            Object::Class(class) => std::fmt::Debug::fmt(class, f),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassObj {
+   name: String,
+}
+
+impl ClassObj {
+    pub fn new(name: String) -> ClassObj {
+        ClassObj {
+            name,
+        }   
+    }
+}
+
+impl Display for ClassObj {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "<class: {}>", self.name)
+    }
+    
+}
+
+#[derive(Debug, Clone)]
+pub struct Instance {
+   class: Rc<ClassObj>,
+   fields: HashMap<String, Value>,
+}
+
+impl Instance {
+    pub fn new(class: Rc<ClassObj> ) -> Instance {
+        Instance {
+            class,
+            fields: HashMap::new(),
         }
     }
 }

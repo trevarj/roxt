@@ -311,6 +311,7 @@ impl<'input> Compiler<'input> {
         let result = match self.peek()?.ttype() {
             TokenType::Var => self.var_decl(),
             TokenType::Fun => self.fun_decl(),
+            TokenType::Class => self.class_decl(),
             _ => self.stmt(),
         };
         Ok(if let Err(err) = result {
@@ -474,6 +475,47 @@ impl<'input> Compiler<'input> {
         let const_ptr = self.make_constant(Value::Object(fun_ptr), line)?;
 
         self.emit_opcode(OpCode::OpClosure(const_ptr, upvals), line);
+        Ok(())
+    }
+
+    fn class_decl(&mut self) -> Result<(), CompilerError> {
+        self.expect(TokenType::Class)?;
+        let class_token = self.expect(TokenType::Identifier)?;
+        let class_ident = class_token.lexeme().to_string();
+        let line = class_token.line();
+        // if local, do not emit constant. store in compiler locals
+        let class_ident_ptr = if self.state.scope_depth == 0 {
+            // global
+            self.emit_ident_const(&class_ident)?
+        } else {
+            // check if variable is already defined locally
+            for (ident, depth, _) in self.state.locals.iter().rev() {
+                if depth.unwrap() < self.state.scope_depth {
+                    break;
+                }
+                if *ident == class_ident {
+                    return Err(CompilerError::ParserLocalVariableAlreadyDefined {
+                        found: class_ident,
+                        line,
+                    });
+                }
+            }
+            self.state.locals.push((class_ident, None, false));
+            self.state.locals.len() - 1
+        };
+
+        self.emit_opcode(OpCode::OpClass(class_ident_ptr), line);
+
+        // if local, don't emit OpDefineGlobal
+        if self.state.scope_depth == 0 {
+            self.emit_opcode(OpCode::OpDefineGlobal(class_ident_ptr), line);
+        } else {
+            // set scope to know that variable was initialized
+            self.state.locals.last_mut().unwrap().1 = Some(self.state.scope_depth);
+        }
+
+        self.expect(TokenType::LeftBrace)?;
+        self.expect(TokenType::RightBrace)?;
         Ok(())
     }
 

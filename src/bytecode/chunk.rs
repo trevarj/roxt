@@ -37,6 +37,7 @@ pub enum OpCode {
     OpLoop(usize),
     OpCall(usize),
     OpClosure(usize, Vec<UpValue>),
+    OpClass(usize),
     OpReturn,
 }
 
@@ -213,6 +214,10 @@ impl Chunk {
                     "{:<4} {:<20} {:<4} {:<10}",
                     line, "OP_CLOSE_UPVALUE", "", ""
                 ),
+                OpCode::OpClass(class_ident_ptr) => println!(
+                    "{:<4} {:<20} {:<4} {:<10}",
+                    line, "OP_CLASS", class_ident_ptr, ""
+                )
             }
         }
 
