@@ -3,6 +3,7 @@ use argh::FromArgs;
 use interpreter::Interpreter;
 use lexer::Lexer;
 use parser::Parser;
+use resolver::Resolver;
 use std::fs::File;
 use std::io::{prelude::*, stdin, stdout, BufReader};
 use std::path::Path;
@@ -24,7 +25,7 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Args = argh::from_env();
-    println!("{:?}", args);
+    // println!("{:?}", args);
 
     // If a path was provided, we will process a file
     // otherwise, we will go to a prompt.
@@ -78,7 +79,9 @@ fn run(source: &str) -> Result<(), Box<dyn std::error::Error>> {
     lexer.scan_tokens(&mut source.chars().peekable())?;
     let tokens = lexer.get_tokens();
     let mut parser = Parser::new(tokens);
+    let mut program = parser::parse(&mut parser).unwrap();
+    Resolver::new().resolve(&mut program).unwrap();
     let interpreter = Interpreter::new();
-    interpreter.interpret(parser::parse(&mut parser)?)?;
+    interpreter.interpret(program)?;
     Ok(())
 }

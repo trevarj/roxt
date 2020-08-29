@@ -1,7 +1,8 @@
 use crate::{chunk::Chunk, value::Value};
 use std::{
+    collections::HashMap,
     fmt::{Debug, Display},
-    rc::Rc, collections::HashMap,
+    rc::Rc,
 };
 
 // #[derive(Clone)]
@@ -42,14 +43,12 @@ impl Debug for Object {
 
 #[derive(Debug, Clone)]
 pub struct ClassObj {
-   name: String,
+    name: String,
 }
 
 impl ClassObj {
     pub fn new(name: String) -> ClassObj {
-        ClassObj {
-            name,
-        }   
+        ClassObj { name }
     }
 }
 
@@ -57,17 +56,16 @@ impl Display for ClassObj {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "<class: {}>", self.name)
     }
-    
 }
 
 #[derive(Debug, Clone)]
 pub struct Instance {
-   class: Rc<ClassObj>,
-   fields: HashMap<String, Value>,
+    class: Rc<ClassObj>,
+    fields: HashMap<String, Value>,
 }
 
 impl Instance {
-    pub fn new(class: Rc<ClassObj> ) -> Instance {
+    pub fn new(class: Rc<ClassObj>) -> Instance {
         Instance {
             class,
             fields: HashMap::new(),

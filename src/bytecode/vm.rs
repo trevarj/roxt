@@ -3,7 +3,7 @@ use crate::value::Value;
 use crate::{
     compiler::{Compiler, UpValue},
     memory::Memory,
-    object::{Closure, ClassObj, Function, FunctionType, Object, UpValueObj},
+    object::{ClassObj, Closure, Function, FunctionType, Object, UpValueObj},
 };
 use std::{
     collections::HashMap,
@@ -94,7 +94,7 @@ impl<'mem> VM<'mem> {
 
         match compiler.compile() {
             Ok(fun) => {
-                fun.chunk().dump(&self.heap);
+                // fun.chunk().dump(&self.heap);
                 let func_ptr = self
                     .heap
                     .add_object(Object::Closure(Closure::new(Vec::new(), Rc::new(fun))));
@@ -377,7 +377,9 @@ impl<'mem> VM<'mem> {
                     let class_ident_obj = self.heap.get_object_by_ptr(class_ident_ptr);
                     if let Object::String(class_ident) = class_ident_obj {
                         let class_ident = class_ident.clone();
-                        let class_obj_ptr = self.heap.add_object(Object::Class(ClassObj::new(class_ident)));
+                        let class_obj_ptr = self
+                            .heap
+                            .add_object(Object::Class(ClassObj::new(class_ident)));
                         self.stack.push(Value::Object(class_obj_ptr))
                     }
                 }

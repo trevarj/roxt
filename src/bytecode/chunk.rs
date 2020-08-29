@@ -217,7 +217,7 @@ impl Chunk {
                 OpCode::OpClass(class_ident_ptr) => println!(
                     "{:<4} {:<20} {:<4} {:<10}",
                     line, "OP_CLASS", class_ident_ptr, ""
-                )
+                ),
             }
         }
 
